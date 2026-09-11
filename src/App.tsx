@@ -2,9 +2,10 @@ import { useState } from 'react'
 import Dashboard from './pages/Dashboard'
 import AgencyReport from './pages/AgencyReport'
 import GoogleAdsReport from './pages/GoogleAdsReport'
+import FacebookAdsReport from './pages/FacebookAdsReport'
 import './index.css'
 
-type View = 'client' | 'agency' | 'google_ads'
+type View = 'client' | 'agency' | 'google_ads' | 'facebook_ads'
 
 function App() {
   const [view, setView] = useState<View>('agency')
@@ -13,6 +14,7 @@ function App() {
     { key: 'agency', label: 'Agencijski izveštaj' },
     { key: 'client', label: 'Po klijentu' },
     { key: 'google_ads', label: 'Google Ads' },
+    { key: 'facebook_ads', label: 'Facebook Ads' },
   ]
 
   return (
@@ -38,6 +40,7 @@ function App() {
         {view === 'agency' && <AgencyReport />}
         {view === 'client' && <Dashboard />}
         {view === 'google_ads' && <GoogleAdsReport />}
+        {view === 'facebook_ads' && <FacebookAdsReport />}
       </div>
     </div>
   )

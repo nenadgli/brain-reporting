@@ -74,3 +74,5 @@ export type GoogleAdsCompetitor = {
   campaign: string
   domain: string
 }
+
+// Facebook Ads types are handled via RPC return rows typed inline in FacebookAdsReport.tsx
