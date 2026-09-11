@@ -9,6 +9,7 @@ const AGENCY_ID = '00000000-0000-0000-0000-000000000001'
 const CHANNEL_LABEL: Record<string, string> = {
   meta_ads: 'Meta Ads',
   google_ads: 'Google Ads',
+  google: 'Google Ads',
   facebook: 'Facebook',
 }
 
