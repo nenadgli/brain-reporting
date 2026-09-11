@@ -1,41 +1,43 @@
 import { useState } from 'react'
 import Dashboard from './pages/Dashboard'
 import AgencyReport from './pages/AgencyReport'
+import GoogleAdsReport from './pages/GoogleAdsReport'
 import './index.css'
 
-type View = 'client' | 'agency'
+type View = 'client' | 'agency' | 'google_ads'
 
 function App() {
   const [view, setView] = useState<View>('agency')
+
+  const tabs: { key: View; label: string }[] = [
+    { key: 'agency', label: 'Agencijski izveštaj' },
+    { key: 'client', label: 'Po klijentu' },
+    { key: 'google_ads', label: 'Google Ads' },
+  ]
 
   return (
     <div className="min-h-screen bg-[var(--color-paper)]">
       <nav className="border-b border-[var(--color-line)] bg-white">
         <div className="mx-auto flex max-w-5xl gap-6 px-8">
-          <button
-            onClick={() => setView('agency')}
-            className={`border-b-2 py-4 text-sm ${
-              view === 'agency'
-                ? 'border-[var(--color-indigo)] text-[var(--color-indigo)]'
-                : 'border-transparent text-[var(--color-ink-soft)]'
-            }`}
-          >
-            Agencijski izveštaj
-          </button>
-          <button
-            onClick={() => setView('client')}
-            className={`border-b-2 py-4 text-sm ${
-              view === 'client'
-                ? 'border-[var(--color-indigo)] text-[var(--color-indigo)]'
-                : 'border-transparent text-[var(--color-ink-soft)]'
-            }`}
-          >
-            Po klijentu
-          </button>
+          {tabs.map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setView(tab.key)}
+              className={`border-b-2 py-4 text-sm ${
+                view === tab.key
+                  ? 'border-[var(--color-indigo)] text-[var(--color-indigo)]'
+                  : 'border-transparent text-[var(--color-ink-soft)]'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
       </nav>
       <div className="mx-auto max-w-5xl px-8 py-10">
-        {view === 'agency' ? <AgencyReport /> : <Dashboard />}
+        {view === 'agency' && <AgencyReport />}
+        {view === 'client' && <Dashboard />}
+        {view === 'google_ads' && <GoogleAdsReport />}
       </div>
     </div>
   )

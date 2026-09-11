@@ -21,3 +21,21 @@ export type ReportMetric = {
   metric_name: string
   metric_value: number
 }
+
+export type GoogleAdsMetric = {
+  id: string
+  client_id: string
+  report_date: string
+  campaign: string
+  campaign_type: string | null
+  device: string | null
+  impressions: number
+  clicks: number
+  spend: number
+  conversions: number
+  conversion_value: number
+  search_impression_share: number | null
+  search_lost_is_budget: number | null
+  search_lost_is_rank: number | null
+  quality_score: number | null
+}
