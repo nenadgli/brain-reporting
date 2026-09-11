@@ -6,9 +6,10 @@ import FacebookAdsReport from './pages/FacebookAdsReport'
 import BlendedReport from './pages/BlendedReport'
 import Ga4Report from './pages/Ga4Report'
 import ExecutiveSummary from './pages/ExecutiveSummary'
+import OwnedChannelsReport from './pages/OwnedChannelsReport'
 import './index.css'
 
-type View = 'summary' | 'client' | 'agency' | 'google_ads' | 'facebook_ads' | 'blended' | 'ga4'
+type View = 'summary' | 'client' | 'agency' | 'google_ads' | 'facebook_ads' | 'blended' | 'ga4' | 'owned'
 
 function App() {
   const [view, setView] = useState<View>('summary')
@@ -21,6 +22,7 @@ function App() {
     { key: 'facebook_ads', label: 'Facebook Ads' },
     { key: 'blended', label: 'Blended' },
     { key: 'ga4', label: 'GA4' },
+    { key: 'owned', label: 'Push & Newsletter' },
   ]
 
   return (
@@ -50,6 +52,7 @@ function App() {
         {view === 'facebook_ads' && <FacebookAdsReport />}
         {view === 'blended' && <BlendedReport />}
         {view === 'ga4' && <Ga4Report />}
+        {view === 'owned' && <OwnedChannelsReport />}
       </div>
     </div>
   )
