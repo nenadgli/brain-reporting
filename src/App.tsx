@@ -4,9 +4,10 @@ import AgencyReport from './pages/AgencyReport'
 import GoogleAdsReport from './pages/GoogleAdsReport'
 import FacebookAdsReport from './pages/FacebookAdsReport'
 import BlendedReport from './pages/BlendedReport'
+import Ga4Report from './pages/Ga4Report'
 import './index.css'
 
-type View = 'client' | 'agency' | 'google_ads' | 'facebook_ads' | 'blended'
+type View = 'client' | 'agency' | 'google_ads' | 'facebook_ads' | 'blended' | 'ga4'
 
 function App() {
   const [view, setView] = useState<View>('agency')
@@ -17,6 +18,7 @@ function App() {
     { key: 'google_ads', label: 'Google Ads' },
     { key: 'facebook_ads', label: 'Facebook Ads' },
     { key: 'blended', label: 'Blended' },
+    { key: 'ga4', label: 'GA4' },
   ]
 
   return (
@@ -44,6 +46,7 @@ function App() {
         {view === 'google_ads' && <GoogleAdsReport />}
         {view === 'facebook_ads' && <FacebookAdsReport />}
         {view === 'blended' && <BlendedReport />}
+        {view === 'ga4' && <Ga4Report />}
       </div>
     </div>
   )
