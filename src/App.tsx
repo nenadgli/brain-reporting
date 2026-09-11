@@ -5,14 +5,16 @@ import GoogleAdsReport from './pages/GoogleAdsReport'
 import FacebookAdsReport from './pages/FacebookAdsReport'
 import BlendedReport from './pages/BlendedReport'
 import Ga4Report from './pages/Ga4Report'
+import ExecutiveSummary from './pages/ExecutiveSummary'
 import './index.css'
 
-type View = 'client' | 'agency' | 'google_ads' | 'facebook_ads' | 'blended' | 'ga4'
+type View = 'summary' | 'client' | 'agency' | 'google_ads' | 'facebook_ads' | 'blended' | 'ga4'
 
 function App() {
-  const [view, setView] = useState<View>('agency')
+  const [view, setView] = useState<View>('summary')
 
   const tabs: { key: View; label: string }[] = [
+    { key: 'summary', label: 'Sažetak za direktora' },
     { key: 'agency', label: 'Agencijski izveštaj' },
     { key: 'client', label: 'Po klijentu' },
     { key: 'google_ads', label: 'Google Ads' },
@@ -41,6 +43,7 @@ function App() {
         </div>
       </nav>
       <div className="mx-auto max-w-5xl px-8 py-10">
+        {view === 'summary' && <ExecutiveSummary />}
         {view === 'agency' && <AgencyReport />}
         {view === 'client' && <Dashboard />}
         {view === 'google_ads' && <GoogleAdsReport />}
