@@ -2,12 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { supabase, type Client, type ReportMetric } from '../lib/supabase'
 
-// Demo-only: in the real app this list comes from the agency's own clients via auth,
-// not a hardcoded slug list. See README for the auth TODO.
-const AVAILABLE_CLIENTS = [
-  { slug: 'pilot-klijent', label: 'Pilot Klijent' },
-  { slug: 'planika-ba', label: 'Planika BA' },
-]
+// Demo-only hardcoded agency id — in the real app this comes from the logged-in
+// agency user's app_users row, not a constant. See README auth TODO.
+const AGENCY_ID = '00000000-0000-0000-0000-000000000001'
 
 const CHANNEL_LABEL: Record<string, string> = {
   meta_ads: 'Meta Ads',
@@ -22,35 +19,47 @@ const METRIC_LABEL: Record<string, string> = {
 }
 
 export default function Dashboard() {
-  const [selectedSlug, setSelectedSlug] = useState(AVAILABLE_CLIENTS[0].slug)
+  const [clientList, setClientList] = useState<Client[]>([])
+  const [selectedId, setSelectedId] = useState<string>('')
   const [client, setClient] = useState<Client | null>(null)
   const [metrics, setMetrics] = useState<ReportMetric[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // Load the list of clients for this agency once, and default to the first one.
   useEffect(() => {
+    async function loadClientList() {
+      const { data, error: listError } = await supabase
+        .from('clients')
+        .select('*')
+        .eq('agency_id', AGENCY_ID)
+        .order('name')
+
+      if (listError || !data || data.length === 0) {
+        setError('Nema klijenata za ovu agenciju.')
+        setLoading(false)
+        return
+      }
+      setClientList(data)
+      setSelectedId(data[0].id)
+    }
+    loadClientList()
+  }, [])
+
+  // Load the selected client's metrics whenever selection changes.
+  useEffect(() => {
+    if (!selectedId) return
     async function load() {
       setLoading(true)
       setError(null)
 
-      const { data: clientData, error: clientError } = await supabase
-        .from('clients')
-        .select('*')
-        .eq('slug', selectedSlug)
-        .single()
-
-      if (clientError || !clientData) {
-        setError('Nije moguće učitati klijenta.')
-        setLoading(false)
-        return
-      }
-
+      const clientData = clientList.find((c) => c.id === selectedId) ?? null
       setClient(clientData)
 
       const { data: metricData, error: metricError } = await supabase
         .from('report_metrics')
         .select('*')
-        .eq('client_id', clientData.id)
+        .eq('client_id', selectedId)
         .order('report_date', { ascending: true })
 
       if (metricError) {
@@ -61,7 +70,7 @@ export default function Dashboard() {
       setLoading(false)
     }
     load()
-  }, [selectedSlug])
+  }, [selectedId, clientList])
 
   const channels = useMemo(() => [...new Set(metrics.map((m) => m.channel))], [metrics])
 
@@ -102,6 +111,10 @@ export default function Dashboard() {
   const hasCampaignData = Object.keys(totalsByCampaign).some((k) => k !== '(bez kampanje)')
   const lineColors = ['var(--color-indigo)', 'var(--color-olive)', 'var(--color-rust)']
 
+  if (error && clientList.length === 0) {
+    return <p className="text-[var(--color-rust)]">{error}</p>
+  }
+
   return (
     <div>
       <header className="mb-10 flex items-end justify-between border-b border-[var(--color-line)] pb-6">
@@ -117,13 +130,13 @@ export default function Dashboard() {
         <label className="text-sm">
           <span className="mr-2 text-[var(--color-ink-soft)]">Klijent</span>
           <select
-            value={selectedSlug}
-            onChange={(e) => setSelectedSlug(e.target.value)}
+            value={selectedId}
+            onChange={(e) => setSelectedId(e.target.value)}
             className="rounded border border-[var(--color-line)] bg-white px-3 py-1.5"
           >
-            {AVAILABLE_CLIENTS.map((c) => (
-              <option key={c.slug} value={c.slug}>
-                {c.label}
+            {clientList.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
               </option>
             ))}
           </select>
