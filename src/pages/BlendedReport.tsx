@@ -62,6 +62,9 @@ export default function BlendedReport() {
   const [channelTotals, setChannelTotals] = useState<{ channel: string; impressions: number; clicks: number; spend: number; conversions: number; conversion_value: number }[]>([])
   const [prevChannelTotals, setPrevChannelTotals] = useState<{ channel: string; impressions: number; clicks: number; spend: number; conversions: number; conversion_value: number }[]>([])
   const [campaigns, setCampaigns] = useState<{ channel: string; campaign: string; impressions: number; clicks: number; spend: number; conversions: number; conversion_value: number }[]>([])
+  const [ga4Verification, setGa4Verification] = useState<{ channel: string; sessions: number; total_users: number; engaged_sessions: number; conversions: number; total_revenue: number }[]>([])
+  const [newVsReturning, setNewVsReturning] = useState<{ report_date: string; new_users: number; returning_users: number }[]>([])
+  const [engagementByChannel, setEngagementByChannel] = useState<{ source: string; sessions: number; engaged_sessions: number; bounce_rate: number | null; conversions: number }[]>([])
 
   const [trendMetric, setTrendMetric] = useState<Metric>('spend')
   const [showGoogle, setShowGoogle] = useState(true)
@@ -138,8 +141,11 @@ export default function BlendedReport() {
           ? supabase.rpc('blended_channel_summary', { p_client_id: selectedId, p_start: dateRange!.previous[0], p_end: dateRange!.previous[1] })
           : Promise.resolve({ data: [], error: null }),
         supabase.rpc('blended_campaign_summary', { p_client_id: selectedId, p_start: cs, p_end: ce }),
+        supabase.rpc('ga4_paid_channel_verification', { p_client_id: selectedId, p_start: cs, p_end: ce }),
+        supabase.rpc('ga4_new_vs_returning_trend', { p_client_id: selectedId, p_start: fullStart, p_end: ce }),
+        supabase.rpc('ga4_engagement_by_channel', { p_client_id: selectedId, p_start: cs, p_end: ce, p_limit: 8 }),
       ]
-      const [trendRes, totRes, prevTotRes, campRes] = await Promise.all(calls)
+      const [trendRes, totRes, prevTotRes, campRes, ga4VerRes, ga4NewRetRes, ga4EngRes] = await Promise.all(calls)
 
       const tRes = trendRes as { data: typeof rawTrend; error: unknown }
       const cRes = totRes as { data: typeof channelTotals; error: unknown }
@@ -148,10 +154,13 @@ export default function BlendedReport() {
         setLoading(false)
         return
       }
-      setRawTrend(tRes.data ?? [])
-      setChannelTotals(cRes.data ?? [])
+      setRawTrend((trendRes as { data: typeof rawTrend }).data ?? [])
+      setChannelTotals((totRes as { data: typeof channelTotals }).data ?? [])
       setPrevChannelTotals(((prevTotRes as { data: typeof channelTotals }).data) ?? [])
       setCampaigns(((campRes as { data: typeof campaigns }).data) ?? [])
+      setGa4Verification((ga4VerRes as { data: typeof ga4Verification }).data ?? [])
+      setNewVsReturning((ga4NewRetRes as { data: typeof newVsReturning }).data ?? [])
+      setEngagementByChannel((ga4EngRes as { data: typeof engagementByChannel }).data ?? [])
       setLoading(false)
     }
     loadAll()
@@ -400,6 +409,112 @@ export default function BlendedReport() {
                 </tbody>
               </table>
             </section>
+          </div>
+
+          {/* GA4 verification: what ad platforms self-report vs what GA4 independently measures */}
+          {ga4Verification.length > 0 && (
+            <section className="mb-10">
+              <h2 className="font-display mb-2 text-lg font-medium">GA4 provera plaćenog saobraćaja</h2>
+              <p className="mb-4 text-xs text-[var(--color-ink-soft)]">
+                Google Ads i Meta sami prijavljuju svoje konverzije preko sopstvenih piksela (levo). GA4 nezavisno meri šta se stvarno desilo na
+                sajtu za posetioce koji su stigli sa tog kanala (desno) &mdash; ovo je "site-side" istina, korisna za proveru da li platforma
+                precenjuje svoj doprinos. Napomena: GA4 "konverzije" broji sve konfigurisane key events (ne samo kupovine), pa se taj broj
+                očekivano neće poklopiti sa brojem konverzija koji prijavljuje ad platforma &mdash; fokusiraj se na sesije i prihod za realno
+                poređenje.
+              </p>
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-[var(--color-line)] text-left text-[var(--color-ink-soft)]">
+                    <th className="py-2 pr-3 font-normal">Kanal</th>
+                    <th className="py-2 pr-3 text-right font-normal">Platforma: potrošnja</th>
+                    <th className="py-2 pr-3 text-right font-normal">Platforma: vrednost konv.</th>
+                    <th className="py-2 pr-3 text-right font-normal">GA4: sesije</th>
+                    <th className="py-2 pr-3 text-right font-normal">GA4: angažovane</th>
+                    <th className="py-2 text-right font-normal">GA4: prihod</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ga4Verification.map((row) => {
+                    const platform = totalsByChannel[row.channel] ?? emptyTotals
+                    return (
+                      <tr key={row.channel} className="border-b border-[var(--color-line)]">
+                        <td className="py-2 pr-3">
+                          <span className="rounded px-1.5 py-0.5 text-xs" style={{ background: row.channel === 'google' ? 'var(--color-indigo-soft)' : '#eef3e9', color: CHANNEL_COLOR[row.channel] }}>
+                            {CHANNEL_LABEL[row.channel]}
+                          </span>
+                        </td>
+                        <td className="py-2 pr-3 text-right font-mono">{fmtEUR(platform.spend)}</td>
+                        <td className="py-2 pr-3 text-right font-mono">{fmtEUR(platform.conversion_value)}</td>
+                        <td className="py-2 pr-3 text-right font-mono">{fmtInt(row.sessions)}</td>
+                        <td className="py-2 pr-3 text-right font-mono">{row.sessions > 0 ? fmtPct((row.engaged_sessions / row.sessions) * 100) : '—'}</td>
+                        <td className="py-2 text-right font-mono">{fmtEUR(row.total_revenue)}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </section>
+          )}
+
+          <div className="mb-10 grid grid-cols-2 gap-8">
+            {/* New vs returning users — retention proxy */}
+            {newVsReturning.length > 0 && (
+              <section>
+                <h2 className="font-display mb-4 text-lg font-medium">Novi vs. povratni korisnici</h2>
+                <div className="h-56 rounded border border-[var(--color-line)] bg-white p-4">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={newVsReturning}>
+                      <CartesianGrid stroke="var(--color-line)" vertical={false} />
+                      <XAxis dataKey="report_date" tickFormatter={(d) => String(d).slice(5)} tick={{ fontSize: 11, fill: 'var(--color-ink-soft)' }} axisLine={{ stroke: 'var(--color-line)' }} tickLine={false} />
+                      <YAxis tick={{ fontSize: 11, fill: 'var(--color-ink-soft)' }} axisLine={false} tickLine={false} />
+                      <Tooltip contentStyle={{ fontSize: 13, borderRadius: 4, border: '1px solid var(--color-line)' }} formatter={(value) => fmtInt(Number(value))} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      <Area type="monotone" dataKey="returning_users" name="Povratni" stackId="u" stroke="var(--color-indigo)" fill="var(--color-indigo)" fillOpacity={0.5} strokeWidth={1.5} />
+                      <Area type="monotone" dataKey="new_users" name="Novi" stackId="u" stroke="var(--color-olive)" fill="var(--color-olive)" fillOpacity={0.5} strokeWidth={1.5} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+                <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+                  Proxy za retention (GA4 ne izlaže kohortni retention preko Windsor konektora) &mdash; prati da li se udeo povratnih korisnika
+                  vremenom širi ili sužava.
+                </p>
+              </section>
+            )}
+
+            {/* Engagement quality by channel */}
+            {engagementByChannel.length > 0 && (
+              <section>
+                <h2 className="font-display mb-4 text-lg font-medium">Kvalitet saobraćaja po kanalu</h2>
+                <table className="w-full border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b border-[var(--color-line)] text-left text-[var(--color-ink-soft)]">
+                      <th className="py-2 font-normal">Izvor</th>
+                      <th className="py-2 text-right font-normal">Sesije</th>
+                      <th className="py-2 text-right font-normal">Bounce rate</th>
+                      <th className="py-2 text-right font-normal">Angažovanost</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {engagementByChannel.map((row) => (
+                      <tr key={row.source} className="border-b border-[var(--color-line)]">
+                        <td className="py-2">{row.source}</td>
+                        <td className="py-2 text-right font-mono">{fmtInt(row.sessions)}</td>
+                        <td className="py-2 text-right font-mono">
+                          {row.bounce_rate != null ? (
+                            <span className={row.bounce_rate > 0.5 ? 'text-[var(--color-rust)]' : ''}>{fmtPct(row.bounce_rate * 100)}</span>
+                          ) : '—'}
+                        </td>
+                        <td className="py-2 text-right font-mono">{row.sessions > 0 ? fmtPct((row.engaged_sessions / row.sessions) * 100) : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+                  Niska angažovanost uz visoku potrošnju na tom kanalu je signal da klikovi dolaze, ali posetioci ne ostaju &mdash; vredi
+                  proveriti landing stranicu i targeting.
+                </p>
+              </section>
+            )}
           </div>
 
           {/* Combined campaign ranking */}
