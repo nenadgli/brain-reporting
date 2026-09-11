@@ -39,3 +39,38 @@ export type GoogleAdsMetric = {
   search_lost_is_rank: number | null
   quality_score: number | null
 }
+
+export type GoogleAdsKeyword = {
+  id: string
+  client_id: string
+  report_date: string
+  campaign: string
+  keyword_text: string
+  keyword_match_type: string | null
+  impressions: number
+  clicks: number
+  spend: number
+  conversions: number
+  conversion_value: number
+  quality_score: number | null
+}
+
+export type GoogleAdsSearchTerm = {
+  id: string
+  client_id: string
+  report_date: string
+  campaign: string
+  search_term: string
+  impressions: number
+  clicks: number
+  spend: number
+  conversions: number
+}
+
+export type GoogleAdsCompetitor = {
+  id: string
+  client_id: string
+  report_date: string
+  campaign: string
+  domain: string
+}
