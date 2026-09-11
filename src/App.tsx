@@ -3,9 +3,10 @@ import Dashboard from './pages/Dashboard'
 import AgencyReport from './pages/AgencyReport'
 import GoogleAdsReport from './pages/GoogleAdsReport'
 import FacebookAdsReport from './pages/FacebookAdsReport'
+import BlendedReport from './pages/BlendedReport'
 import './index.css'
 
-type View = 'client' | 'agency' | 'google_ads' | 'facebook_ads'
+type View = 'client' | 'agency' | 'google_ads' | 'facebook_ads' | 'blended'
 
 function App() {
   const [view, setView] = useState<View>('agency')
@@ -15,6 +16,7 @@ function App() {
     { key: 'client', label: 'Po klijentu' },
     { key: 'google_ads', label: 'Google Ads' },
     { key: 'facebook_ads', label: 'Facebook Ads' },
+    { key: 'blended', label: 'Blended' },
   ]
 
   return (
@@ -41,6 +43,7 @@ function App() {
         {view === 'client' && <Dashboard />}
         {view === 'google_ads' && <GoogleAdsReport />}
         {view === 'facebook_ads' && <FacebookAdsReport />}
+        {view === 'blended' && <BlendedReport />}
       </div>
     </div>
   )
