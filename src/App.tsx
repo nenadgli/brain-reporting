@@ -10,9 +10,10 @@ import BlendedReport from './pages/BlendedReport'
 import Ga4Report from './pages/Ga4Report'
 import ExecutiveSummary from './pages/ExecutiveSummary'
 import OwnedChannelsReport from './pages/OwnedChannelsReport'
+import ChatAssistant from './pages/ChatAssistant'
 import './index.css'
 
-type View = 'summary' | 'client' | 'agency' | 'google_ads' | 'facebook_ads' | 'blended' | 'ga4' | 'owned'
+type View = 'summary' | 'client' | 'agency' | 'google_ads' | 'facebook_ads' | 'blended' | 'ga4' | 'owned' | 'chat'
 
 function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined)
@@ -28,6 +29,7 @@ function App() {
 
   const tabs: { key: View; label: string }[] = [
     { key: 'summary', label: 'Sažetak za direktora' },
+    { key: 'chat', label: 'AI Chat' },
     { key: 'agency', label: 'Agencijski izveštaj' },
     { key: 'client', label: 'Po klijentu' },
     { key: 'google_ads', label: 'Google Ads' },
@@ -75,6 +77,7 @@ function App() {
       </nav>
       <div className="mx-auto max-w-5xl px-8 py-10">
         {view === 'summary' && <ExecutiveSummary />}
+        {view === 'chat' && <ChatAssistant />}
         {view === 'agency' && <AgencyReport />}
         {view === 'client' && <Dashboard />}
         {view === 'google_ads' && <GoogleAdsReport />}
