@@ -1,4 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import type { Session } from '@supabase/supabase-js'
+import { supabase } from './lib/supabase'
+import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import AgencyReport from './pages/AgencyReport'
 import GoogleAdsReport from './pages/GoogleAdsReport'
@@ -12,7 +15,16 @@ import './index.css'
 type View = 'summary' | 'client' | 'agency' | 'google_ads' | 'facebook_ads' | 'blended' | 'ga4' | 'owned'
 
 function App() {
+  const [session, setSession] = useState<Session | null | undefined>(undefined)
   const [view, setView] = useState<View>('summary')
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setSession(data.session))
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession)
+    })
+    return () => listener.subscription.unsubscribe()
+  }, [])
 
   const tabs: { key: View; label: string }[] = [
     { key: 'summary', label: 'Sažetak za direktora' },
@@ -25,23 +37,40 @@ function App() {
     { key: 'owned', label: 'Push & Newsletter' },
   ]
 
+  // Still checking for an existing session — avoid flashing the login screen.
+  if (session === undefined) {
+    return <div className="flex min-h-screen items-center justify-center bg-[var(--color-paper)] text-[var(--color-ink-soft)]">Učitavanje…</div>
+  }
+
+  if (session === null) {
+    return <Login />
+  }
+
   return (
     <div className="min-h-screen bg-[var(--color-paper)]">
       <nav className="border-b border-[var(--color-line)] bg-white">
-        <div className="mx-auto flex max-w-5xl gap-6 px-8">
-          {tabs.map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => setView(tab.key)}
-              className={`border-b-2 py-4 text-sm ${
-                view === tab.key
-                  ? 'border-[var(--color-indigo)] text-[var(--color-indigo)]'
-                  : 'border-transparent text-[var(--color-ink-soft)]'
-              }`}
-            >
-              {tab.label}
+        <div className="mx-auto flex max-w-5xl items-center justify-between px-8">
+          <div className="flex gap-6">
+            {tabs.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setView(tab.key)}
+                className={`border-b-2 py-4 text-sm ${
+                  view === tab.key
+                    ? 'border-[var(--color-indigo)] text-[var(--color-indigo)]'
+                    : 'border-transparent text-[var(--color-ink-soft)]'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-3 text-xs text-[var(--color-ink-soft)]">
+            <span>{session.user.email}</span>
+            <button onClick={() => supabase.auth.signOut()} className="rounded px-2 py-1 hover:bg-[var(--color-paper)]">
+              Odjava
             </button>
-          ))}
+          </div>
         </div>
       </nav>
       <div className="mx-auto max-w-5xl px-8 py-10">
