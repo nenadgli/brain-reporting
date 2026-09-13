@@ -35,7 +35,7 @@ function pctChange(curr: number, prev: number): { pct: number; dir: Direction } 
 
 function ChangeBadge({ dir, pct, favorable }: { dir: Direction; pct: number; favorable: 'up' | 'down' | 'neutral' }) {
   const isGood = favorable === 'neutral' ? null : dir === favorable
-  const color = dir === 'flat' || isGood === null ? 'text-[var(--color-ink-soft)]' : isGood ? 'text-[var(--color-olive)]' : 'text-[var(--color-rust)]'
+  const color = dir === 'flat' || isGood === null ? 'text-white/70' : isGood ? 'text-white font-semibold' : 'text-amber-200 font-semibold'
   const arrow = dir === 'up' ? '↑' : dir === 'down' ? '↓' : '·'
   return (
     <span className={`ml-2 font-mono text-xs ${color}`}>
@@ -257,7 +257,7 @@ export default function BlendedReport() {
     <div>
       <header className="mb-8 flex items-end justify-between border-b border-[var(--color-line)] pb-6">
         <div>
-          <p className="font-mono text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">Blended izveštaj</p>
+          <p className="kpi-label">Blended izveštaj</p>
           <h1 className="font-display mt-1 text-4xl font-medium">{loading ? '…' : clients.find((c) => c.id === selectedId)?.name}</h1>
           <p className="mt-2 text-[var(--color-ink-soft)]">{rangeLabel ? `Period: ${rangeLabel}` : 'Učitavanje perioda…'} &middot; Google Ads + Meta zajedno</p>
         </div>
@@ -278,7 +278,7 @@ export default function BlendedReport() {
       {!error && !loading && (
         <>
           {/* Combined KPIs */}
-          <section className="mb-10 grid grid-cols-4 gap-px border border-[var(--color-line)] bg-[var(--color-line)]">
+          <section className="mb-10 kpi-grid grid-cols-4">
             {[
               { label: 'Ukupna potrošnja', val: fmtEUR(combined.spend), curr: combined.spend, prev: prevCombined.spend, favorable: 'neutral' as const },
               { label: 'Ukupne konverzije', val: fmtInt(combined.conversions), curr: combined.conversions, prev: prevCombined.conversions, favorable: 'up' as const },
@@ -291,9 +291,9 @@ export default function BlendedReport() {
             ].map((kpi) => {
               const { pct, dir } = pctChange(kpi.curr, kpi.prev)
               return (
-                <div key={kpi.label} className="bg-white p-4">
-                  <p className="font-mono text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">{kpi.label}</p>
-                  <p className="font-display mt-1 text-2xl">{kpi.val}</p>
+                <div key={kpi.label} className="kpi-card">
+                  <p className="kpi-label">{kpi.label}</p>
+                  <p className="kpi-value">{kpi.val}</p>
                   {hasComparison && <ChangeBadge dir={dir} pct={pct} favorable={kpi.favorable} />}
                 </div>
               )

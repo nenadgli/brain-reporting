@@ -25,7 +25,7 @@ export default function Login() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-[var(--color-paper)] px-6">
       <div className="w-full max-w-sm">
-        <p className="font-mono text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">Brain Reporting Platform</p>
+        <p className="kpi-label">Brain Reporting Platform</p>
         <h1 className="font-display mt-1 mb-8 text-3xl font-medium">Prijava</h1>
 
         {status === 'sent' ? (

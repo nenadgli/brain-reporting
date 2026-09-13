@@ -56,7 +56,7 @@ function pctChange(curr: number, prev: number): { pct: number; dir: Direction } 
 
 function ChangeBadge({ dir, pct, favorable }: { dir: Direction; pct: number; favorable: 'up' | 'down' | 'neutral' }) {
   const isGood = favorable === 'neutral' ? null : dir === favorable
-  const color = dir === 'flat' || isGood === null ? 'text-[var(--color-ink-soft)]' : isGood ? 'text-[var(--color-olive)]' : 'text-[var(--color-rust)]'
+  const color = dir === 'flat' || isGood === null ? 'text-white/70' : isGood ? 'text-white font-semibold' : 'text-amber-200 font-semibold'
   const arrow = dir === 'up' ? '↑' : dir === 'down' ? '↓' : '·'
   return (
     <span className={`ml-2 font-mono text-xs ${color}`}>
@@ -220,7 +220,7 @@ export default function FacebookAdsReport() {
     <div>
       <header className="mb-8 flex items-end justify-between border-b border-[var(--color-line)] pb-6">
         <div>
-          <p className="font-mono text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">Facebook &amp; Instagram Ads</p>
+          <p className="kpi-label">Facebook &amp; Instagram Ads</p>
           <h1 className="font-display mt-1 text-4xl font-medium">{loading ? '…' : clients.find((c) => c.id === selectedId)?.name}</h1>
           <p className="mt-2 text-[var(--color-ink-soft)]">{rangeLabel ? `Period: ${rangeLabel}` : 'Učitavanje perioda…'} &middot; svi ciljevi i plasmani</p>
         </div>
@@ -240,7 +240,7 @@ export default function FacebookAdsReport() {
 
       {!error && !loading && (
         <>
-          <section className="mb-10 grid grid-cols-5 gap-px border border-[var(--color-line)] bg-[var(--color-line)]">
+          <section className="mb-10 kpi-grid grid-cols-5">
             {[
               { label: 'Potrošnja', val: fmtEUR(totals.spend), curr: totals.spend, prev: prevTotals.spend, favorable: 'neutral' as const },
               { label: 'Doseg (reach)', val: fmtInt(totals.reach), curr: totals.reach, prev: prevTotals.reach, favorable: 'up' as const },
@@ -255,9 +255,9 @@ export default function FacebookAdsReport() {
             ].map((kpi) => {
               const { pct, dir } = pctChange(kpi.curr, kpi.prev)
               return (
-                <div key={kpi.label} className="bg-white p-4">
-                  <p className="font-mono text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">{kpi.label}</p>
-                  <p className="font-display mt-1 text-2xl">{kpi.val}</p>
+                <div key={kpi.label} className="kpi-card">
+                  <p className="kpi-label">{kpi.label}</p>
+                  <p className="kpi-value">{kpi.val}</p>
                   {hasComparison && <ChangeBadge dir={dir} pct={pct} favorable={kpi.favorable} />}
                 </div>
               )

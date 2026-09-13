@@ -120,7 +120,7 @@ export default function Dashboard() {
     <div>
       <header className="mb-10 flex items-end justify-between border-b border-[var(--color-line)] pb-6">
         <div>
-          <p className="font-mono text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">
+          <p className="kpi-label">
             Pilot Agencija
           </p>
           <h1 className="font-display mt-1 text-4xl font-medium">

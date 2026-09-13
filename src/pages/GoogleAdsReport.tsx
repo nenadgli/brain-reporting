@@ -49,10 +49,10 @@ function ChangeBadge({ dir, pct, favorable }: { dir: Direction; pct: number; fav
   const isGood = favorable === 'neutral' ? null : dir === favorable
   const color =
     dir === 'flat' || isGood === null
-      ? 'text-[var(--color-ink-soft)]'
+      ? 'text-white/70'
       : isGood
-        ? 'text-[var(--color-olive)]'
-        : 'text-[var(--color-rust)]'
+        ? 'text-white font-semibold'
+        : 'text-amber-200 font-semibold'
   const arrow = dir === 'up' ? '↑' : dir === 'down' ? '↓' : '·'
   return (
     <span className={`ml-2 font-mono text-xs ${color}`}>
@@ -249,7 +249,7 @@ export default function GoogleAdsReport() {
     <div>
       <header className="mb-8 flex items-end justify-between border-b border-[var(--color-line)] pb-6">
         <div>
-          <p className="font-mono text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">Google Ads</p>
+          <p className="kpi-label">Google Ads</p>
           <h1 className="font-display mt-1 text-4xl font-medium">
             {loading ? '…' : clients.find((c) => c.id === selectedId)?.name}
           </h1>
@@ -271,7 +271,7 @@ export default function GoogleAdsReport() {
 
       {!error && !loading && (
         <>
-          <section className="mb-10 grid grid-cols-5 gap-px border border-[var(--color-line)] bg-[var(--color-line)]">
+          <section className="mb-10 kpi-grid grid-cols-5">
             {[
               { label: 'Potrošnja', val: fmtEUR(totals.spend), curr: totals.spend, prev: prevTotals.spend, favorable: 'neutral' as const },
               { label: 'Impresije', val: fmtInt(totals.impressions), curr: totals.impressions, prev: prevTotals.impressions, favorable: 'neutral' as const },
@@ -286,9 +286,9 @@ export default function GoogleAdsReport() {
             ].map((kpi) => {
               const { pct, dir } = pctChange(kpi.curr, kpi.prev)
               return (
-                <div key={kpi.label} className="bg-white p-4">
-                  <p className="font-mono text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">{kpi.label}</p>
-                  <p className="font-display mt-1 text-2xl">{kpi.val}</p>
+                <div key={kpi.label} className="kpi-card">
+                  <p className="kpi-label">{kpi.label}</p>
+                  <p className="kpi-value">{kpi.val}</p>
                   {hasComparison && <ChangeBadge dir={dir} pct={pct} favorable={kpi.favorable} />}
                 </div>
               )
@@ -362,12 +362,12 @@ export default function GoogleAdsReport() {
           {impressionShare != null && (
             <section className="mb-10">
               <h2 className="font-display mb-4 text-lg font-medium">Search Impression Share</h2>
-              <div className="grid grid-cols-3 gap-px border border-[var(--color-line)] bg-[var(--color-line)]">
-                <div className="bg-white p-4">
-                  <p className="font-mono text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">Osvojeni udeo</p>
-                  <p className="font-display mt-1 text-2xl">{fmtPct(impressionShare)}</p>
+              <div className="kpi-grid grid-cols-3">
+                <div className="kpi-card">
+                  <p className="kpi-label">Osvojeni udeo</p>
+                  <p className="kpi-value">{fmtPct(impressionShare)}</p>
                 </div>
-                <div className="col-span-2 bg-white p-4 flex items-center">
+                <div className="col-span-2 flex items-center rounded border border-[var(--color-line)] bg-[var(--color-indigo-soft)] p-4">
                   <p className="text-xs text-[var(--color-ink-soft)]">
                     Windsor trenutno ne izlaže "izgubljeno zbog budžeta/ranga" kao brojčane vrednosti za ovaj nalog — samo ukupan osvojeni udeo.
                   </p>

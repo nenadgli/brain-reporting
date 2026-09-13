@@ -50,26 +50,26 @@ function App() {
 
   return (
     <div className="min-h-screen bg-[var(--color-paper)]">
-      <nav className="border-b border-[var(--color-line)] bg-white">
+      <nav className="bg-[var(--color-bar)]">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-8">
-          <div className="flex gap-6">
+          <div className="flex gap-6 overflow-x-auto">
             {tabs.map((tab) => (
               <button
                 key={tab.key}
                 onClick={() => setView(tab.key)}
-                className={`border-b-2 py-4 text-sm ${
+                className={`whitespace-nowrap border-b-2 py-4 text-sm font-medium ${
                   view === tab.key
-                    ? 'border-[var(--color-indigo)] text-[var(--color-indigo)]'
-                    : 'border-transparent text-[var(--color-ink-soft)]'
+                    ? 'border-[var(--color-indigo)] text-white'
+                    : 'border-transparent text-slate-400 hover:text-slate-200'
                 }`}
               >
                 {tab.label}
               </button>
             ))}
           </div>
-          <div className="flex items-center gap-3 text-xs text-[var(--color-ink-soft)]">
+          <div className="flex items-center gap-3 text-xs text-slate-400">
             <span>{session.user.email}</span>
-            <button onClick={() => supabase.auth.signOut()} className="rounded px-2 py-1 hover:bg-[var(--color-paper)]">
+            <button onClick={() => supabase.auth.signOut()} className="rounded px-2 py-1 hover:bg-white/10 hover:text-white">
               Odjava
             </button>
           </div>

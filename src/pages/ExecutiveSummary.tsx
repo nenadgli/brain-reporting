@@ -235,7 +235,7 @@ export default function ExecutiveSummary() {
     <div className="mx-auto max-w-3xl">
       <header className="mb-10 flex items-end justify-between border-b border-[var(--color-line)] pb-6">
         <div>
-          <p className="font-mono text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">Sažetak za direktora</p>
+          <p className="kpi-label">Sažetak za direktora</p>
           <h1 className="font-display mt-1 text-4xl font-medium">{loading ? '…' : clients.find((c) => c.id === selectedId)?.name}</h1>
           <p className="mt-2 text-[var(--color-ink-soft)]">{rangeLabel ? `Period: ${rangeLabel}` : 'Učitavanje perioda…'}</p>
         </div>
@@ -273,22 +273,22 @@ export default function ExecutiveSummary() {
           </section>
 
           {/* Snapshot metrics row */}
-          <section className="mb-10 grid grid-cols-4 gap-px border border-[var(--color-line)] bg-[var(--color-line)]">
-            <div className="bg-white p-4">
-              <p className="font-mono text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">Potrošnja</p>
-              <p className="font-display mt-1 text-2xl">{fmtEUR(combined.spend)}</p>
+          <section className="mb-10 kpi-grid grid-cols-4">
+            <div className="kpi-card">
+              <p className="kpi-label">Potrošnja</p>
+              <p className="kpi-value">{fmtEUR(combined.spend)}</p>
             </div>
-            <div className="bg-white p-4">
-              <p className="font-mono text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">Vrednost konverzija</p>
-              <p className="font-display mt-1 text-2xl">{fmtEUR(combined.conversion_value)}</p>
+            <div className="kpi-card">
+              <p className="kpi-label">Vrednost konverzija</p>
+              <p className="kpi-value">{fmtEUR(combined.conversion_value)}</p>
             </div>
-            <div className="bg-white p-4">
-              <p className="font-mono text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">Blended ROAS</p>
-              <p className="font-display mt-1 text-2xl">{roas.toFixed(2)}x</p>
+            <div className="kpi-card">
+              <p className="kpi-label">Blended ROAS</p>
+              <p className="kpi-value">{roas.toFixed(2)}x</p>
             </div>
-            <div className="bg-white p-4">
-              <p className="font-mono text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">Konverzije</p>
-              <p className="font-display mt-1 text-2xl">{fmtInt(combined.conversions)}</p>
+            <div className="kpi-card">
+              <p className="kpi-label">Konverzije</p>
+              <p className="kpi-value">{fmtInt(combined.conversions)}</p>
             </div>
           </section>
 

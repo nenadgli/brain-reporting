@@ -141,22 +141,22 @@ export default function AgencyReport() {
 
   return (
     <div>
-      <section className="mb-10 grid grid-cols-4 gap-px border border-[var(--color-line)] bg-[var(--color-line)]">
-        <div className="bg-white p-5">
-          <p className="font-mono text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">Klijenata</p>
-          <p className="font-display mt-1 text-3xl">{clients.length}</p>
+      <section className="mb-10 kpi-grid grid-cols-4">
+        <div className="kpi-card">
+          <p className="kpi-label">Klijenata</p>
+          <p className="kpi-value">{clients.length}</p>
         </div>
-        <div className="bg-white p-5">
-          <p className="font-mono text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">Ukupna potrošnja</p>
-          <p className="font-display mt-1 text-3xl">€{overallTotals.spend.toLocaleString('sr-RS', { maximumFractionDigits: 0 })}</p>
+        <div className="kpi-card">
+          <p className="kpi-label">Ukupna potrošnja</p>
+          <p className="kpi-value">€{overallTotals.spend.toLocaleString('sr-RS', { maximumFractionDigits: 0 })}</p>
         </div>
-        <div className="bg-white p-5">
-          <p className="font-mono text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">Ukupno klikova</p>
-          <p className="font-display mt-1 text-3xl">{overallTotals.clicks.toLocaleString('sr-RS')}</p>
+        <div className="kpi-card">
+          <p className="kpi-label">Ukupno klikova</p>
+          <p className="kpi-value">{overallTotals.clicks.toLocaleString('sr-RS')}</p>
         </div>
-        <div className="bg-white p-5">
-          <p className="font-mono text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">Aktivnih kanala</p>
-          <p className="font-display mt-1 text-3xl">{activeChannels}</p>
+        <div className="kpi-card">
+          <p className="kpi-label">Aktivnih kanala</p>
+          <p className="kpi-value">{activeChannels}</p>
         </div>
       </section>
 

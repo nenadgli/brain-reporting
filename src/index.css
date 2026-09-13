@@ -1,15 +1,23 @@
 @import "tailwindcss";
-@import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
 :root {
-  --color-paper: #f7f7f5;
-  --color-ink: #151719;
-  --color-ink-soft: #55585c;
-  --color-line: #dcdcd8;
-  --color-indigo: #33397a;
-  --color-indigo-soft: #eceeff;
-  --color-olive: #5c7a4a;
-  --color-rust: #b8482f;
+  --color-paper: #ffffff;
+  --color-ink: #0f172a;
+  --color-ink-soft: #64748b;
+  --color-line: #e2e8f0;
+
+  /* Primary brand teal — drives KPI panels, active states, chart lines */
+  --color-indigo: #0ea678;
+  --color-indigo-soft: #e3f7ef;
+  --color-indigo-dark: #0b7a5a;
+
+  /* Secondary accent (kept var name for drop-in chart compatibility) */
+  --color-olive: #0f172a;
+  /* Alert / negative accent */
+  --color-rust: #e15b45;
+
+  --color-bar: #0f172a;
 }
 
 * {
@@ -24,12 +32,14 @@ body {
   margin: 0;
   background: var(--color-paper);
   color: var(--color-ink);
-  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  font-family: 'Poppins', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
 .font-display {
-  font-family: 'Newsreader', Georgia, serif;
+  font-family: 'Poppins', system-ui, sans-serif;
+  font-weight: 800;
+  letter-spacing: -0.01em;
 }
 
 .font-mono {
@@ -39,4 +49,33 @@ body {
 :focus-visible {
   outline: 2px solid var(--color-indigo);
   outline-offset: 2px;
+}
+
+/* Solid color KPI panel — the "quarterly sales template" hero-metric look */
+.kpi-card {
+  background: var(--color-indigo);
+  color: #ffffff;
+  padding: 1.1rem 1.25rem;
+  border-radius: 10px;
+}
+.kpi-card .kpi-label {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.75);
+}
+.kpi-card .kpi-value {
+  font-family: 'Poppins', system-ui, sans-serif;
+  font-weight: 800;
+  font-size: 1.65rem;
+  margin-top: 0.2rem;
+  letter-spacing: -0.01em;
+}
+.kpi-card.kpi-dark {
+  background: var(--color-bar);
+}
+.kpi-grid {
+  display: grid;
+  gap: 0.75rem;
 }

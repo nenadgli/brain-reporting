@@ -13,7 +13,6 @@ import { supabase, type Client } from '../lib/supabase'
 
 const AGENCY_ID = '00000000-0000-0000-0000-000000000001'
 const CHANNEL_LABEL: Record<string, string> = { push_notification: 'Push notifikacije', newsletter: 'Newsletter (email)' }
-const CHANNEL_COLOR: Record<string, string> = { push_notification: 'var(--color-indigo)', newsletter: 'var(--color-olive)' }
 
 const fmtEUR = (n: number) => `€${n.toLocaleString('sr-RS', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 const fmtInt = (n: number) => n.toLocaleString('sr-RS', { maximumFractionDigits: 0 })
@@ -145,7 +144,7 @@ export default function OwnedChannelsReport() {
     <div>
       <header className="mb-8 flex items-end justify-between border-b border-[var(--color-line)] pb-6">
         <div>
-          <p className="font-mono text-xs uppercase tracking-wide text-[var(--color-ink-soft)]">Sopstveni kanali (owned) &middot; iz GA4</p>
+          <p className="kpi-label">Sopstveni kanali (owned) &middot; iz GA4</p>
           <h1 className="font-display mt-1 text-4xl font-medium">{loading ? '…' : clients.find((c) => c.id === selectedId)?.name}</h1>
           <p className="mt-2 text-[var(--color-ink-soft)]">{rangeLabel ? `Period: ${rangeLabel}` : 'Učitavanje perioda…'} &middot; Push notifikacije + Newsletter</p>
         </div>
@@ -187,32 +186,32 @@ export default function OwnedChannelsReport() {
             {(['push_notification', 'newsletter'] as const).map((ch) => {
               const t = totals[ch]
               return (
-                <div key={ch} className="border border-[var(--color-line)] bg-white p-5">
-                  <p className="font-mono text-xs uppercase tracking-wide" style={{ color: CHANNEL_COLOR[ch] }}>{CHANNEL_LABEL[ch]}</p>
-                  <p className="font-display mt-1 mb-4 text-2xl">{fmtEUR(t.total_revenue)}</p>
-                  <div className="grid grid-cols-2 gap-3 text-sm">
+                <div key={ch} className="kpi-card">
+                  <p className="kpi-label" style={{ color: 'rgba(255,255,255,0.85)' }}>{CHANNEL_LABEL[ch]}</p>
+                  <p className="kpi-value">{fmtEUR(t.total_revenue)}</p>
+                  <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
                     <div>
-                      <p className="text-[var(--color-ink-soft)]">Sesije</p>
+                      <p className="text-white/70">Sesije</p>
                       <p className="font-mono">{fmtInt(t.sessions)}</p>
                     </div>
                     <div>
-                      <p className="text-[var(--color-ink-soft)]">Korisnici</p>
+                      <p className="text-white/70">Korisnici</p>
                       <p className="font-mono">{fmtInt(t.total_users)}</p>
                     </div>
                     <div>
-                      <p className="text-[var(--color-ink-soft)]">Broj slanja</p>
+                      <p className="text-white/70">Broj slanja</p>
                       <p className="font-mono">{fmtInt(t.campaign_count)}</p>
                     </div>
                     <div>
-                      <p className="text-[var(--color-ink-soft)]">Prihod po slanju</p>
+                      <p className="text-white/70">Prihod po slanju</p>
                       <p className="font-mono">{fmtEUR(revenuePerCampaign(t))}</p>
                     </div>
                     <div>
-                      <p className="text-[var(--color-ink-soft)]">Angažovanost</p>
+                      <p className="text-white/70">Angažovanost</p>
                       <p className="font-mono">{t.sessions > 0 ? fmtPct((t.engaged_sessions / t.sessions) * 100) : '—'}</p>
                     </div>
                     <div>
-                      <p className="text-[var(--color-ink-soft)]">Prihod / sesiji</p>
+                      <p className="text-white/70">Prihod / sesiji</p>
                       <p className="font-mono">{fmtEUR(revenuePerSession(t))}</p>
                     </div>
                   </div>
