@@ -257,7 +257,7 @@ export default function BlendedReport() {
     <div>
       <header className="mb-8 flex items-end justify-between border-b border-[var(--color-line)] pb-6">
         <div>
-          <p className="kpi-label">Blended izveštaj</p>
+          <p className="eyebrow-label">Blended izveštaj</p>
           <h1 className="font-display mt-1 text-4xl font-medium">{loading ? '…' : clients.find((c) => c.id === selectedId)?.name}</h1>
           <p className="mt-2 text-[var(--color-ink-soft)]">{rangeLabel ? `Period: ${rangeLabel}` : 'Učitavanje perioda…'} &middot; Google Ads + Meta zajedno</p>
         </div>

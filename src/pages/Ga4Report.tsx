@@ -169,7 +169,7 @@ export default function Ga4Report() {
     <div>
       <header className="mb-8 flex items-end justify-between border-b border-[var(--color-line)] pb-6">
         <div>
-          <p className="kpi-label">Google Analytics 4 &middot; Tržište RS</p>
+          <p className="eyebrow-label">Google Analytics 4 &middot; Tržište RS</p>
           <h1 className="font-display mt-1 text-4xl font-medium">{loading ? '…' : clients.find((c) => c.id === selectedId)?.name}</h1>
           <p className="mt-2 text-[var(--color-ink-soft)]">{rangeLabel ? `Period: ${rangeLabel}` : 'Učitavanje perioda…'} &middot; ceo sajt (svi kanali saobraćaja)</p>
         </div>

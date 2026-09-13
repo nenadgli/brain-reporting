@@ -52,7 +52,7 @@ export default function ChatAssistant() {
   return (
     <div className="mx-auto flex h-[75vh] max-w-3xl flex-col">
       <header className="mb-4 border-b border-[var(--color-line)] pb-4">
-        <p className="kpi-label">AI asistent</p>
+        <p className="eyebrow-label">AI asistent</p>
         <h1 className="font-display mt-1 text-3xl font-medium">Pitaj svoje podatke</h1>
       </header>
 

@@ -235,7 +235,7 @@ export default function ExecutiveSummary() {
     <div className="mx-auto max-w-3xl">
       <header className="mb-10 flex items-end justify-between border-b border-[var(--color-line)] pb-6">
         <div>
-          <p className="kpi-label">Sažetak za direktora</p>
+          <p className="eyebrow-label">Sažetak za direktora</p>
           <h1 className="font-display mt-1 text-4xl font-medium">{loading ? '…' : clients.find((c) => c.id === selectedId)?.name}</h1>
           <p className="mt-2 text-[var(--color-ink-soft)]">{rangeLabel ? `Period: ${rangeLabel}` : 'Učitavanje perioda…'}</p>
         </div>

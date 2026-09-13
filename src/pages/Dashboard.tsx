@@ -120,7 +120,7 @@ export default function Dashboard() {
     <div>
       <header className="mb-10 flex items-end justify-between border-b border-[var(--color-line)] pb-6">
         <div>
-          <p className="kpi-label">
+          <p className="eyebrow-label">
             Pilot Agencija
           </p>
           <h1 className="font-display mt-1 text-4xl font-medium">

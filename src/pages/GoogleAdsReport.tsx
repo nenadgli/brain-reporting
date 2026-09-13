@@ -249,7 +249,7 @@ export default function GoogleAdsReport() {
     <div>
       <header className="mb-8 flex items-end justify-between border-b border-[var(--color-line)] pb-6">
         <div>
-          <p className="kpi-label">Google Ads</p>
+          <p className="eyebrow-label">Google Ads</p>
           <h1 className="font-display mt-1 text-4xl font-medium">
             {loading ? '…' : clients.find((c) => c.id === selectedId)?.name}
           </h1>

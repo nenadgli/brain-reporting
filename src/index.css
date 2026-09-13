@@ -79,3 +79,13 @@ body {
   display: grid;
   gap: 0.75rem;
 }
+
+/* Section eyebrow labels on the plain white page background (page headers) —
+   distinct from .kpi-label, which is white text meant for the dark kpi-card. */
+.eyebrow-label {
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-ink-soft);
+}
