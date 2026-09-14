@@ -65,6 +65,8 @@ export default function BlendedReport() {
   const [ga4Verification, setGa4Verification] = useState<{ channel: string; sessions: number; total_users: number; engaged_sessions: number; conversions: number; total_revenue: number }[]>([])
   const [newVsReturning, setNewVsReturning] = useState<{ report_date: string; new_users: number; returning_users: number }[]>([])
   const [engagementByChannel, setEngagementByChannel] = useState<{ source: string; sessions: number; engaged_sessions: number; bounce_rate: number | null; conversions: number }[]>([])
+  const [funnelGroups, setFunnelGroups] = useState<{ funnel_group: string; spend: number; conversions: number; conversion_value: number }[]>([])
+  const [funnelDetail, setFunnelDetail] = useState<{ funnel_group: string; funnel_stage: string; campaign_subtype: string; channel: string; spend: number; clicks: number; conversions: number; conversion_value: number }[]>([])
 
   const [trendMetric, setTrendMetric] = useState<Metric>('spend')
   const [showGoogle, setShowGoogle] = useState(true)
@@ -145,7 +147,12 @@ export default function BlendedReport() {
         supabase.rpc('ga4_new_vs_returning_trend', { p_client_id: selectedId, p_start: fullStart, p_end: ce }),
         supabase.rpc('ga4_engagement_by_channel', { p_client_id: selectedId, p_start: cs, p_end: ce, p_limit: 8 }),
       ]
+      const isFashionRs = clients.find((c) => c.id === selectedId)?.slug === 'fashion-friends-rs'
+      const funnelCalls = isFashionRs
+        ? [supabase.rpc('fashion_rs_funnel_group_totals', { p_start: cs, p_end: ce }), supabase.rpc('fashion_rs_funnel_summary', { p_start: cs, p_end: ce })]
+        : [Promise.resolve({ data: [], error: null }), Promise.resolve({ data: [], error: null })]
       const [trendRes, totRes, prevTotRes, campRes, ga4VerRes, ga4NewRetRes, ga4EngRes] = await Promise.all(calls)
+      const [funnelGroupRes, funnelDetailRes] = await Promise.all(funnelCalls)
 
       const tRes = trendRes as { data: typeof rawTrend; error: unknown }
       const cRes = totRes as { data: typeof channelTotals; error: unknown }
@@ -161,6 +168,8 @@ export default function BlendedReport() {
       setGa4Verification((ga4VerRes as { data: typeof ga4Verification }).data ?? [])
       setNewVsReturning((ga4NewRetRes as { data: typeof newVsReturning }).data ?? [])
       setEngagementByChannel((ga4EngRes as { data: typeof engagementByChannel }).data ?? [])
+      setFunnelGroups((funnelGroupRes as { data: typeof funnelGroups }).data ?? [])
+      setFunnelDetail((funnelDetailRes as { data: typeof funnelDetail }).data ?? [])
       setLoading(false)
     }
     loadAll()
@@ -516,6 +525,63 @@ export default function BlendedReport() {
               </section>
             )}
           </div>
+
+          {/* Fashion&Friends RS specific: Brandformance vs Pure Performance funnel, from campaign naming convention */}
+          {funnelGroups.length > 0 && (
+            <section className="mb-10">
+              <h2 className="font-display mb-2 text-lg font-medium">Funnel: Brandformance vs Pure Performance</h2>
+              <p className="mb-4 text-xs text-[var(--color-ink-soft)]">
+                Klasifikacija po agencijskoj naming konvenciji (Ct:/Ph: tagovi u imenu kampanje), Google Ads + Meta zajedno.
+              </p>
+              <div className="mb-6 grid grid-cols-2 gap-3">
+                {funnelGroups.map((g) => {
+                  const roas = g.spend > 0 ? g.conversion_value / g.spend : 0
+                  return (
+                    <div key={g.funnel_group} className="kpi-card">
+                      <p className="kpi-label">{g.funnel_group}</p>
+                      <p className="kpi-value">{fmtEUR(g.spend)}</p>
+                      <p className="mt-2 text-xs text-white/80">
+                        {fmtInt(g.conversions)} konverzija &middot; ROAS {roas.toFixed(2)}x
+                      </p>
+                    </div>
+                  )
+                })}
+              </div>
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-[var(--color-line)] text-left text-[var(--color-ink-soft)]">
+                    <th className="py-2 pr-3 font-normal">Podtip</th>
+                    <th className="py-2 pr-3 font-normal">Grupa</th>
+                    <th className="py-2 pr-3 font-normal">Faza</th>
+                    <th className="py-2 pr-3 font-normal">Kanal</th>
+                    <th className="py-2 pr-3 text-right font-normal">Potrošnja</th>
+                    <th className="py-2 pr-3 text-right font-normal">Konv.</th>
+                    <th className="py-2 text-right font-normal">ROAS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {funnelDetail.map((row, i) => {
+                    const roas = row.spend > 0 ? row.conversion_value / row.spend : 0
+                    return (
+                      <tr key={i} className="border-b border-[var(--color-line)]">
+                        <td className="py-2 pr-3">{row.campaign_subtype}</td>
+                        <td className="py-2 pr-3 text-[var(--color-ink-soft)]">{row.funnel_group}</td>
+                        <td className="py-2 pr-3 text-[var(--color-ink-soft)]">{row.funnel_stage}</td>
+                        <td className="py-2 pr-3">
+                          <span className="rounded px-1.5 py-0.5 text-xs" style={{ background: row.channel === 'google' ? 'var(--color-indigo-soft)' : '#eef3e9', color: row.channel === 'google' ? 'var(--color-indigo)' : 'var(--color-olive)' }}>
+                            {CHANNEL_LABEL[row.channel]}
+                          </span>
+                        </td>
+                        <td className="py-2 pr-3 text-right font-mono">{fmtEUR(row.spend)}</td>
+                        <td className="py-2 pr-3 text-right font-mono">{fmtInt(row.conversions)}</td>
+                        <td className="py-2 text-right font-mono">{row.spend > 0 ? `${roas.toFixed(2)}x` : '—'}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </section>
+          )}
 
           {/* Combined campaign ranking */}
           <section>
