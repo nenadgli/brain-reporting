@@ -58,6 +58,8 @@ export default function BlendedReport() {
   const [error, setError] = useState<string | null>(null)
 
   const [dateRange, setDateRange] = useState<{ current: [string, string]; previous: [string, string] | null } | null>(null)
+  const [dataMinMax, setDataMinMax] = useState<[string, string] | null>(null)
+  const [monthMode, setMonthMode] = useState<'auto' | string>('auto')
   const [rawTrend, setRawTrend] = useState<{ report_date: string; channel: string; spend: number; conversions: number; conversion_value: number }[]>([])
   const [channelTotals, setChannelTotals] = useState<{ channel: string; impressions: number; clicks: number; spend: number; conversions: number; conversion_value: number }[]>([])
   const [prevChannelTotals, setPrevChannelTotals] = useState<{ channel: string; impressions: number; clicks: number; spend: number; conversions: number; conversion_value: number }[]>([])
@@ -112,8 +114,36 @@ export default function BlendedReport() {
         setLoading(false)
         return
       }
-      const minDate = row.min_date as string
-      const maxDate = row.max_date as string
+      setDataMinMax([row.min_date as string, row.max_date as string])
+      setMonthMode('auto')
+    }
+    findRange()
+  }, [selectedId])
+
+  // Serbian month names for the month picker
+  const MONTH_NAMES = ['januar', 'februar', 'mart', 'april', 'maj', 'jun', 'jul', 'avgust', 'septembar', 'oktobar', 'novembar', 'decembar']
+
+  const monthOptions = useMemo(() => {
+    if (!dataMinMax) return []
+    const [minDate, maxDate] = dataMinMax
+    const opts: { value: string; label: string }[] = []
+    const cursor = new Date(minDate.slice(0, 7) + '-01')
+    const end = new Date(maxDate.slice(0, 7) + '-01')
+    while (cursor <= end) {
+      const y = cursor.getFullYear()
+      const m = cursor.getMonth()
+      opts.push({ value: `${y}-${String(m + 1).padStart(2, '0')}`, label: `${MONTH_NAMES[m]} ${y}` })
+      cursor.setMonth(cursor.getMonth() + 1)
+    }
+    return opts.reverse()
+  }, [dataMinMax])
+
+  // Recompute the actual date range whenever monthMode or the data bounds change
+  useEffect(() => {
+    if (!dataMinMax) return
+    const [minDate, maxDate] = dataMinMax
+
+    if (monthMode === 'auto') {
       const totalDays = Math.round((new Date(maxDate).getTime() - new Date(minDate).getTime()) / 86400000) + 1
       const half = Math.floor(totalDays / 2)
       if (half === 0) {
@@ -124,9 +154,27 @@ export default function BlendedReport() {
         const prevStart = new Date(new Date(prevEnd).getTime() - (half - 1) * 86400000).toISOString().slice(0, 10)
         setDateRange({ current: [currentStart, maxDate], previous: [prevStart, prevEnd] })
       }
+      return
     }
-    findRange()
-  }, [selectedId])
+
+    // Specific calendar month selected, e.g. "2026-08"
+    const [y, m] = monthMode.split('-').map(Number)
+    const monthStart = `${y}-${String(m).padStart(2, '0')}-01`
+    const lastDayOfMonth = new Date(y, m, 0).getDate()
+    const monthEndRaw = `${y}-${String(m).padStart(2, '0')}-${String(lastDayOfMonth).padStart(2, '0')}`
+    const monthEnd = monthEndRaw > maxDate ? maxDate : monthEndRaw
+
+    // Previous calendar month, only used for comparison if we actually have data that far back
+    const prevMonthDate = new Date(y, m - 2, 1)
+    const prevY = prevMonthDate.getFullYear()
+    const prevM = prevMonthDate.getMonth() + 1
+    const prevStart = `${prevY}-${String(prevM).padStart(2, '0')}-01`
+    const prevLastDay = new Date(prevY, prevM, 0).getDate()
+    const prevEnd = `${prevY}-${String(prevM).padStart(2, '0')}-${String(prevLastDay).padStart(2, '0')}`
+    const previous = prevStart >= minDate ? ([prevStart, prevEnd] as [string, string]) : null
+
+    setDateRange({ current: [monthStart, monthEnd], previous })
+  }, [monthMode, dataMinMax])
 
   useEffect(() => {
     if (!selectedId || !dateRange) return
@@ -270,16 +318,27 @@ export default function BlendedReport() {
           <h1 className="font-display mt-1 text-4xl font-medium">{loading ? '…' : clients.find((c) => c.id === selectedId)?.name}</h1>
           <p className="mt-2 text-[var(--color-ink-soft)]">{rangeLabel ? `Period: ${rangeLabel}` : 'Učitavanje perioda…'} &middot; Google Ads + Meta zajedno</p>
         </div>
-        {clients.length > 1 && (
+        <div className="flex items-end gap-4">
           <label className="text-sm">
-            <span className="mr-2 text-[var(--color-ink-soft)]">Klijent</span>
-            <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)} className="rounded border border-[var(--color-line)] bg-white px-3 py-1.5">
-              {clients.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
+            <span className="mr-2 text-[var(--color-ink-soft)]">Period</span>
+            <select value={monthMode} onChange={(e) => setMonthMode(e.target.value)} className="rounded border border-[var(--color-line)] bg-white px-3 py-1.5">
+              <option value="auto">Automatski (poslednji period)</option>
+              {monthOptions.map((m) => (
+                <option key={m.value} value={m.value}>{m.label}</option>
               ))}
             </select>
           </label>
-        )}
+          {clients.length > 1 && (
+            <label className="text-sm">
+              <span className="mr-2 text-[var(--color-ink-soft)]">Klijent</span>
+              <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)} className="rounded border border-[var(--color-line)] bg-white px-3 py-1.5">
+                {clients.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
       </header>
 
       {error && <p className="text-[var(--color-rust)]">{error}</p>}
