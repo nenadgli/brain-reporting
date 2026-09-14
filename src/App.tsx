@@ -12,9 +12,10 @@ import ExecutiveSummary from './pages/ExecutiveSummary'
 import OwnedChannelsReport from './pages/OwnedChannelsReport'
 import ChatAssistant from './pages/ChatAssistant'
 import PpcMediaReport from './pages/PpcMediaReport'
+import BudgetPacingReport from './pages/BudgetPacingReport'
 import './index.css'
 
-type View = 'summary' | 'client' | 'agency' | 'google_ads' | 'facebook_ads' | 'blended' | 'ga4' | 'owned' | 'chat' | 'ppc'
+type View = 'summary' | 'client' | 'agency' | 'google_ads' | 'facebook_ads' | 'blended' | 'ga4' | 'owned' | 'chat' | 'ppc' | 'pacing'
 
 function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined)
@@ -39,6 +40,7 @@ function App() {
     { key: 'ga4', label: 'GA4' },
     { key: 'owned', label: 'Push & Newsletter' },
     { key: 'ppc', label: 'PPC Media Plan' },
+    { key: 'pacing', label: 'Budget Pacing' },
   ]
 
   // Still checking for an existing session — avoid flashing the login screen.
@@ -88,6 +90,7 @@ function App() {
         {view === 'ga4' && <Ga4Report />}
         {view === 'owned' && <OwnedChannelsReport />}
         {view === 'ppc' && <PpcMediaReport />}
+        {view === 'pacing' && <BudgetPacingReport />}
       </div>
     </div>
   )
