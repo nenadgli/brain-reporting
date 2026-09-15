@@ -10,7 +10,6 @@ const fmtInt = (n: number) => n.toLocaleString('sr-RS', { maximumFractionDigits:
 const fmtPct = (n: number) => `${n.toLocaleString('sr-RS', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`
 
 type ChannelRow = { channel: string; bucket: string; spend: number; reach: number; impressions: number; clicks: number; conversions: number; conversion_value: number }
-type CampaignRow = ChannelRow & { campaign: string }
 
 const MONTH_NAMES = ['januar', 'februar', 'mart', 'april', 'maj', 'jun', 'jul', 'avgust', 'septembar', 'oktobar', 'novembar', 'decembar']
 
@@ -20,9 +19,8 @@ export default function PpcMediaReport() {
   const [dataMinMax, setDataMinMax] = useState<[string, string] | null>(null)
   const [monthValue, setMonthValue] = useState<string>('')
   const [channelRows, setChannelRows] = useState<ChannelRow[]>([])
-  const [campaignRows, setCampaignRows] = useState<CampaignRow[]>([])
+  const [structureRows, setStructureRows] = useState<{ row_order: number; row_label: string; channel: string; level: string; sub_dimension: string | null; spend: number; clicks: number; impressions: number; conversions: number; conversion_value: number }[]>([])
   const [ga4Check, setGa4Check] = useState<{ channel: string; sessions: number; total_users: number; engaged_sessions: number; conversions: number; total_revenue: number }[]>([])
-  const [bucketFilter, setBucketFilter] = useState<string>('all')
 
   useEffect(() => {
     async function init() {
@@ -75,10 +73,10 @@ export default function PpcMediaReport() {
       setLoading(true)
       setError(null)
       const [cs, ce] = range!
-      const [chRes, campRes, ga4Res] = await Promise.all([
+      const [chRes, ga4Res, structRes] = await Promise.all([
         supabase.rpc('fashion_rs_ppc_channel_summary', { p_start: cs, p_end: ce }),
-        supabase.rpc('fashion_rs_ppc_campaign_detail', { p_start: cs, p_end: ce }),
         supabase.rpc('ga4_paid_channel_verification', { p_client_id: 'c710bfd0-5281-412b-a7d6-2a96c80b9b57', p_start: cs, p_end: ce }),
+        supabase.rpc('fashion_rs_report_structure', { p_start: cs, p_end: ce }),
       ])
       if (chRes.error) {
         setError('Nije moguće učitati podatke.')
@@ -86,8 +84,8 @@ export default function PpcMediaReport() {
         return
       }
       setChannelRows(chRes.data ?? [])
-      setCampaignRows(campRes.data ?? [])
       setGa4Check(ga4Res.data ?? [])
+      setStructureRows(structRes.data ?? [])
       setLoading(false)
     }
     loadAll()
@@ -106,10 +104,22 @@ export default function PpcMediaReport() {
     )
   }, [channelRows])
 
-  const filteredCampaigns = useMemo(
-    () => (bucketFilter === 'all' ? campaignRows : campaignRows.filter((c) => c.bucket === bucketFilter)).slice(0, 60),
-    [campaignRows, bucketFilter]
-  )
+  const groupedStructure = useMemo(() => {
+    const groups = new Map<string, { row_label: string; channel: string; level: string; rows: typeof structureRows; total: { spend: number; clicks: number; impressions: number; conversions: number; conversion_value: number } }>()
+    for (const r of structureRows) {
+      if (!groups.has(r.row_label)) {
+        groups.set(r.row_label, { row_label: r.row_label, channel: r.channel, level: r.level, rows: [], total: { spend: 0, clicks: 0, impressions: 0, conversions: 0, conversion_value: 0 } })
+      }
+      const g = groups.get(r.row_label)!
+      g.rows.push(r)
+      g.total.spend += r.spend
+      g.total.clicks += r.clicks
+      g.total.impressions += r.impressions
+      g.total.conversions += r.conversions
+      g.total.conversion_value += r.conversion_value
+    }
+    return [...groups.values()]
+  }, [structureRows])
 
   const monthLabel = monthOptions.find((m) => m.value === monthValue)?.label ?? ''
 
@@ -239,26 +249,16 @@ export default function PpcMediaReport() {
           )}
 
           <section>
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="font-display text-lg font-medium">Sve kampanje</h2>
-              <div className="flex gap-1 text-xs">
-                {['all', 'Ecomm', 'Loyalty', 'Social'].map((b) => (
-                  <button
-                    key={b}
-                    onClick={() => setBucketFilter(b)}
-                    className={`rounded px-2 py-1 ${bucketFilter === b ? 'bg-[var(--color-indigo-soft)] text-[var(--color-indigo)]' : 'text-[var(--color-ink-soft)]'}`}
-                  >
-                    {b === 'all' ? 'Sve' : BUCKET_LABEL[b]}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <h2 className="font-display mb-2 text-lg font-medium">Struktura izveštaja</h2>
+            <p className="mb-4 text-xs text-[var(--color-ink-soft)]">
+              Prati dogovorenu strukturu: neke kampanje su spojene u jedan red (npr. "Search Category + Brand", "BOF"), a neke su prikazane sa
+              detaljom po ad setu (Meta), ad grupi ili asset grupi (Google PMax).
+            </p>
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b border-[var(--color-line)] text-left text-[var(--color-ink-soft)]">
-                  <th className="py-2 pr-3 font-normal">Kampanja</th>
+                  <th className="py-2 pr-3 font-normal">Red</th>
                   <th className="py-2 pr-3 font-normal">Mreža</th>
-                  <th className="py-2 pr-3 font-normal">Raspon</th>
                   <th className="py-2 pr-3 text-right font-normal">Spend</th>
                   <th className="py-2 pr-3 text-right font-normal">Klikovi</th>
                   <th className="py-2 pr-3 text-right font-normal">CTR</th>
@@ -267,24 +267,37 @@ export default function PpcMediaReport() {
                 </tr>
               </thead>
               <tbody>
-                {filteredCampaigns.map((c, i) => {
-                  const ctr = c.impressions > 0 ? (c.clicks / c.impressions) * 100 : 0
-                  const roas = c.spend > 0 ? c.conversion_value / c.spend : 0
+                {groupedStructure.map((g) => {
+                  const ctr = g.total.impressions > 0 ? (g.total.clicks / g.total.impressions) * 100 : 0
+                  const roas = g.total.spend > 0 ? g.total.conversion_value / g.total.spend : 0
                   return (
-                    <tr key={i} className="border-b border-[var(--color-line)]">
-                      <td className="py-2 pr-3 max-w-[260px] truncate" title={c.campaign}>{c.campaign}</td>
-                      <td className="py-2 pr-3 text-[var(--color-ink-soft)]">{CHANNEL_LABEL[c.channel]}</td>
-                      <td className="py-2 pr-3">
-                        <span className="rounded px-1.5 py-0.5 text-xs text-white" style={{ background: BUCKET_COLOR[c.bucket] }}>
-                          {c.bucket}
-                        </span>
-                      </td>
-                      <td className="py-2 pr-3 text-right font-mono">{fmtEUR(c.spend)}</td>
-                      <td className="py-2 pr-3 text-right font-mono">{fmtInt(c.clicks)}</td>
-                      <td className="py-2 pr-3 text-right font-mono">{fmtPct(ctr)}</td>
-                      <td className="py-2 pr-3 text-right font-mono">{fmtInt(c.conversions)}</td>
-                      <td className="py-2 text-right font-mono">{c.spend > 0 ? `${roas.toFixed(2)}x` : '—'}</td>
-                    </tr>
+                    <>
+                      <tr key={g.row_label} className="border-b border-[var(--color-line)] bg-[var(--color-indigo-soft)]">
+                        <td className="py-2 pr-3 font-medium">{g.row_label}</td>
+                        <td className="py-2 pr-3 text-[var(--color-ink-soft)]">{CHANNEL_LABEL[g.channel]}</td>
+                        <td className="py-2 pr-3 text-right font-mono">{fmtEUR(g.total.spend)}</td>
+                        <td className="py-2 pr-3 text-right font-mono">{fmtInt(g.total.clicks)}</td>
+                        <td className="py-2 pr-3 text-right font-mono">{fmtPct(ctr)}</td>
+                        <td className="py-2 pr-3 text-right font-mono">{fmtInt(g.total.conversions)}</td>
+                        <td className="py-2 text-right font-mono">{g.total.spend > 0 ? `${roas.toFixed(2)}x` : '—'}</td>
+                      </tr>
+                      {g.level !== 'campaign' &&
+                        g.rows.map((sr, i) => {
+                          const srCtr = sr.impressions > 0 ? (sr.clicks / sr.impressions) * 100 : 0
+                          const srRoas = sr.spend > 0 ? sr.conversion_value / sr.spend : 0
+                          return (
+                            <tr key={`${g.row_label}-${i}`} className="border-b border-[var(--color-line)] text-[var(--color-ink-soft)]">
+                              <td className="py-1.5 pr-3 pl-6 max-w-[240px] truncate" title={sr.sub_dimension ?? ''}>↳ {sr.sub_dimension}</td>
+                              <td className="py-1.5 pr-3"></td>
+                              <td className="py-1.5 pr-3 text-right font-mono">{fmtEUR(sr.spend)}</td>
+                              <td className="py-1.5 pr-3 text-right font-mono">{fmtInt(sr.clicks)}</td>
+                              <td className="py-1.5 pr-3 text-right font-mono">{fmtPct(srCtr)}</td>
+                              <td className="py-1.5 pr-3 text-right font-mono">{fmtInt(sr.conversions)}</td>
+                              <td className="py-1.5 text-right font-mono">{sr.spend > 0 ? `${srRoas.toFixed(2)}x` : '—'}</td>
+                            </tr>
+                          )
+                        })}
+                    </>
                   )
                 })}
               </tbody>
