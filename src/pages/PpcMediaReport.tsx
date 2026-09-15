@@ -19,7 +19,7 @@ export default function PpcMediaReport() {
   const [dataMinMax, setDataMinMax] = useState<[string, string] | null>(null)
   const [monthValue, setMonthValue] = useState<string>('')
   const [channelRows, setChannelRows] = useState<ChannelRow[]>([])
-  const [structureRows, setStructureRows] = useState<{ row_order: number; row_label: string; channel: string; level: string; sub_dimension: string | null; spend: number; reach: number; clicks: number; impressions: number; conversions: number; conversion_value: number }[]>([])
+  const [structureRows, setStructureRows] = useState<{ row_order: number; row_label: string; channel: string; level: string; sub_dimension: string | null; spend: number; reach: number; clicks: number; impressions: number; conversions: number; conversion_value: number; revenue_source: string }[]>([])
   const [ga4Check, setGa4Check] = useState<{ channel: string; sessions: number; total_users: number; engaged_sessions: number; conversions: number; total_revenue: number }[]>([])
 
   useEffect(() => {
@@ -256,7 +256,9 @@ export default function PpcMediaReport() {
             <h2 className="font-display mb-2 text-lg font-medium">Struktura izveštaja</h2>
             <p className="mb-4 text-xs text-[var(--color-ink-soft)]">
               Prati dogovorenu strukturu: neke kampanje su spojene u jedan red (npr. "Search Category + Brand", "BOF"), a neke su prikazane sa
-              detaljom po ad setu (Meta), ad grupi ili asset grupi (Google PMax).
+              detaljom po ad setu (Meta), ad grupi ili asset grupi (Google PMax). Revenue je izvučen iz GA4 (nezavisna sajt-side istina) gde god
+              je to moguće po imenu kampanje; za Google PMax/Demand Gen ad grupe i asset grupe (gde GA4 nema tu granularnost) prikazuje se
+              platformski prihod.
             </p>
 
             <h3 className="font-display mb-3 mt-6 text-base font-medium">Google Ads</h3>
