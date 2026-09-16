@@ -16,6 +16,8 @@ const MONTH_NAMES = ['januar', 'februar', 'mart', 'april', 'maj', 'jun', 'jul', 
 export default function PpcMediaReport() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [clients, setClients] = useState<{ id: string; name: string }[]>([])
+  const [selectedClientId, setSelectedClientId] = useState<string>('')
   const [dataMinMax, setDataMinMax] = useState<[string, string] | null>(null)
   const [monthValue, setMonthValue] = useState<string>('')
   const [channelRows, setChannelRows] = useState<ChannelRow[]>([])
@@ -23,11 +25,29 @@ export default function PpcMediaReport() {
   const [ga4Check, setGa4Check] = useState<{ channel: string; sessions: number; total_users: number; engaged_sessions: number; conversions: number; total_revenue: number }[]>([])
 
   useEffect(() => {
+    async function loadClients() {
+      const { data, error: clientsError } = await supabase
+        .from('fashion_rs_report_rows')
+        .select('client_id, clients(id, name)')
+      if (clientsError || !data) return
+      const seen = new Map<string, string>()
+      for (const row of data as unknown as { client_id: string; clients: { id: string; name: string } }[]) {
+        if (row.clients) seen.set(row.client_id, row.clients.name)
+      }
+      const list = [...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
+      setClients(list)
+      if (list.length > 0) setSelectedClientId(list[0].id)
+    }
+    loadClients()
+  }, [])
+
+  useEffect(() => {
+    if (!selectedClientId) return
     async function init() {
       setLoading(true)
       setError(null)
       const { data, error: rangeError } = await supabase.rpc('blended_date_range', {
-        p_client_id: 'c710bfd0-5281-412b-a7d6-2a96c80b9b57',
+        p_client_id: selectedClientId,
       })
       const row = data?.[0]
       if (rangeError || !row || !row.min_date || !row.max_date) {
@@ -40,7 +60,7 @@ export default function PpcMediaReport() {
       setMonthValue(maxMonth)
     }
     init()
-  }, [])
+  }, [selectedClientId])
 
   const monthOptions = useMemo(() => {
     if (!dataMinMax) return []
@@ -68,15 +88,15 @@ export default function PpcMediaReport() {
   }, [monthValue, dataMinMax])
 
   useEffect(() => {
-    if (!range) return
+    if (!range || !selectedClientId) return
     async function loadAll() {
       setLoading(true)
       setError(null)
       const [cs, ce] = range!
       const [chRes, ga4Res, structRes] = await Promise.all([
-        supabase.rpc('fashion_rs_ppc_channel_summary', { p_start: cs, p_end: ce }),
-        supabase.rpc('ga4_paid_channel_verification', { p_client_id: 'c710bfd0-5281-412b-a7d6-2a96c80b9b57', p_start: cs, p_end: ce }),
-        supabase.rpc('fashion_rs_report_structure', { p_start: cs, p_end: ce }),
+        supabase.rpc('fashion_rs_ppc_channel_summary', { p_client_id: selectedClientId, p_start: cs, p_end: ce }),
+        supabase.rpc('ga4_paid_channel_verification', { p_client_id: selectedClientId, p_start: cs, p_end: ce }),
+        supabase.rpc('fashion_rs_report_structure', { p_client_id: selectedClientId, p_start: cs, p_end: ce }),
       ])
       if (chRes.error) {
         setError('Nije moguće učitati podatke.')
@@ -89,7 +109,7 @@ export default function PpcMediaReport() {
       setLoading(false)
     }
     loadAll()
-  }, [range])
+  }, [range, selectedClientId])
 
   const totals = useMemo(() => {
     return channelRows.reduce(
@@ -136,17 +156,29 @@ export default function PpcMediaReport() {
       <header className="mb-8 flex items-end justify-between border-b border-[var(--color-line)] pb-6">
         <div>
           <p className="eyebrow-label">Media Plan izveštaj &middot; po ugledu na PPC tim</p>
-          <h1 className="font-display mt-1 text-4xl font-medium">Fashion&amp;Friends RS</h1>
+          <h1 className="font-display mt-1 text-4xl font-medium">{clients.find((c) => c.id === selectedClientId)?.name ?? '…'}</h1>
           <p className="mt-2 text-[var(--color-ink-soft)]">{monthLabel ? `Period: ${monthLabel}` : 'Učitavanje…'} &middot; Google Ads + Meta Ads</p>
         </div>
-        <label className="text-sm">
-          <span className="mr-2 text-[var(--color-ink-soft)]">Mesec</span>
-          <select value={monthValue} onChange={(e) => setMonthValue(e.target.value)} className="rounded border border-[var(--color-line)] bg-white px-3 py-1.5">
-            {monthOptions.map((m) => (
-              <option key={m.value} value={m.value}>{m.label}</option>
-            ))}
-          </select>
-        </label>
+        <div className="flex items-end gap-4">
+          {clients.length > 1 && (
+            <label className="text-sm">
+              <span className="mr-2 text-[var(--color-ink-soft)]">Klijent</span>
+              <select value={selectedClientId} onChange={(e) => setSelectedClientId(e.target.value)} className="rounded border border-[var(--color-line)] bg-white px-3 py-1.5">
+                {clients.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label className="text-sm">
+            <span className="mr-2 text-[var(--color-ink-soft)]">Mesec</span>
+            <select value={monthValue} onChange={(e) => setMonthValue(e.target.value)} className="rounded border border-[var(--color-line)] bg-white px-3 py-1.5">
+              {monthOptions.map((m) => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+          </label>
+        </div>
       </header>
 
       {!loading && (

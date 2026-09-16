@@ -3,8 +3,6 @@ import Papa from 'papaparse'
 import { Line, ComposedChart, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { supabase } from '../lib/supabase'
 
-const FASHION_RS_CLIENT_ID = 'c710bfd0-5281-412b-a7d6-2a96c80b9b57'
-
 const SR_MONTH_TO_NUM: Record<string, number> = {
   januar: 1, februar: 2, mart: 3, april: 4, maj: 5, jun: 6, jul: 7,
   avgust: 8, septembar: 9, oktobar: 10, novembar: 11, decembar: 12,
@@ -131,6 +129,8 @@ function paceStatus(pctSpent: number, pctTime: number): { label: string; color: 
 export default function BudgetPacingReport() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [clients, setClients] = useState<{ id: string; name: string }[]>([])
+  const [selectedClientId, setSelectedClientId] = useState<string>('')
   const [monthOptions, setMonthOptions] = useState<{ value: string; label: string }[]>([])
   const [monthValue, setMonthValue] = useState<string>('')
   const [googleRows, setGoogleRows] = useState<GoogleRow[]>([])
@@ -139,11 +139,28 @@ export default function BudgetPacingReport() {
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle')
   const [uploadMessage, setUploadMessage] = useState<string>('')
 
-  async function loadMonths(selectAfterLoad?: string) {
+  useEffect(() => {
+    async function loadClients() {
+      const { data, error: clientsError } = await supabase
+        .from('fashion_rs_report_rows')
+        .select('client_id, clients(id, name)')
+      if (clientsError || !data) return
+      const seen = new Map<string, string>()
+      for (const row of data as unknown as { client_id: string; clients: { id: string; name: string } }[]) {
+        if (row.clients) seen.set(row.client_id, row.clients.name)
+      }
+      const list = [...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
+      setClients(list)
+      if (list.length > 0) setSelectedClientId(list[0].id)
+    }
+    loadClients()
+  }, [])
+
+  async function loadMonths(clientId: string, selectAfterLoad?: string) {
     const { data, error: err } = await supabase
       .from('media_plan_lines')
       .select('month')
-      .eq('client_id', FASHION_RS_CLIENT_ID)
+      .eq('client_id', clientId)
     if (err) {
       setError('Greška pri učitavanju media plana.')
       setLoading(false)
@@ -165,8 +182,9 @@ export default function BudgetPacingReport() {
   }
 
   useEffect(() => {
-    loadMonths()
-  }, [])
+    if (!selectedClientId) return
+    loadMonths(selectedClientId)
+  }, [selectedClientId])
 
   async function handleFileUpload(file: File) {
     setUploadStatus('uploading')
@@ -180,16 +198,16 @@ export default function BudgetPacingReport() {
         return
       }
       // Replace any existing plan for this month before inserting the fresh upload.
-      const { error: delErr } = await supabase.from('media_plan_lines').delete().eq('client_id', FASHION_RS_CLIENT_ID).eq('month', parsed.month)
+      const { error: delErr } = await supabase.from('media_plan_lines').delete().eq('client_id', selectedClientId).eq('month', parsed.month)
       if (delErr) throw delErr
 
-      const rows = parsed.lines.map((l) => ({ client_id: FASHION_RS_CLIENT_ID, month: parsed.month, ...l }))
+      const rows = parsed.lines.map((l) => ({ client_id: selectedClientId, month: parsed.month, ...l }))
       const { error: insErr } = await supabase.from('media_plan_lines').insert(rows)
       if (insErr) throw insErr
 
       setUploadStatus('done')
       setUploadMessage(`Uvezeno ${rows.length} linija plana za ${MONTH_NAMES[parseInt(parsed.month.slice(5, 7), 10) - 1]} ${parsed.month.slice(0, 4)}.`)
-      await loadMonths(parsed.month)
+      await loadMonths(selectedClientId, parsed.month)
     } catch (e) {
       setUploadStatus('error')
       setUploadMessage((e as Error).message)
@@ -197,14 +215,14 @@ export default function BudgetPacingReport() {
   }
 
   useEffect(() => {
-    if (!monthValue) return
+    if (!monthValue || !selectedClientId) return
     async function load() {
       setLoading(true)
       setError(null)
       const [gRes, mRes, dRes] = await Promise.all([
-        supabase.rpc('fashion_rs_google_pacing', { p_month: monthValue }),
-        supabase.rpc('fashion_rs_meta_pacing', { p_month: monthValue }),
-        supabase.rpc('fashion_rs_daily_pacing', { p_month: monthValue }),
+        supabase.rpc('fashion_rs_google_pacing', { p_client_id: selectedClientId, p_month: monthValue }),
+        supabase.rpc('fashion_rs_meta_pacing', { p_client_id: selectedClientId, p_month: monthValue }),
+        supabase.rpc('fashion_rs_daily_pacing', { p_client_id: selectedClientId, p_month: monthValue }),
       ])
       if (gRes.error || mRes.error) {
         setError('Nije moguće učitati podatke o budžetu.')
@@ -217,7 +235,7 @@ export default function BudgetPacingReport() {
       setLoading(false)
     }
     load()
-  }, [monthValue])
+  }, [monthValue, selectedClientId])
 
   const monthLabel = monthOptions.find((m) => m.value === monthValue)?.label ?? ''
 
@@ -256,21 +274,33 @@ export default function BudgetPacingReport() {
       <header className="mb-8 flex items-end justify-between border-b border-[var(--color-line)] pb-6">
         <div>
           <p className="eyebrow-label">Praćenje budžeta naspram media plana &middot; dnevno</p>
-          <h1 className="font-display mt-1 text-4xl font-medium">Fashion&amp;Friends RS</h1>
+          <h1 className="font-display mt-1 text-4xl font-medium">{clients.find((c) => c.id === selectedClientId)?.name ?? '…'}</h1>
           <p className="mt-2 text-[var(--color-ink-soft)]">
             {monthOptions.length > 0 ? `Period: ${monthLabel} · planirano vs. stvarno potrošeno` : 'Nema uvezenog media plana još uvek'}
           </p>
         </div>
-        {monthOptions.length > 0 && (
-          <label className="text-sm">
-            <span className="mr-2 text-[var(--color-ink-soft)]">Mesec</span>
-            <select value={monthValue} onChange={(e) => setMonthValue(e.target.value)} className="rounded border border-[var(--color-line)] bg-white px-3 py-1.5">
-              {monthOptions.map((m) => (
-                <option key={m.value} value={m.value}>{m.label}</option>
-              ))}
-            </select>
-          </label>
-        )}
+        <div className="flex items-end gap-4">
+          {clients.length > 1 && (
+            <label className="text-sm">
+              <span className="mr-2 text-[var(--color-ink-soft)]">Klijent</span>
+              <select value={selectedClientId} onChange={(e) => setSelectedClientId(e.target.value)} className="rounded border border-[var(--color-line)] bg-white px-3 py-1.5">
+                {clients.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </label>
+          )}
+          {monthOptions.length > 0 && (
+            <label className="text-sm">
+              <span className="mr-2 text-[var(--color-ink-soft)]">Mesec</span>
+              <select value={monthValue} onChange={(e) => setMonthValue(e.target.value)} className="rounded border border-[var(--color-line)] bg-white px-3 py-1.5">
+                {monthOptions.map((m) => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
       </header>
 
       {/* Media plan upload */}
