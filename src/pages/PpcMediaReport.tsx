@@ -9,7 +9,7 @@ const fmtEUR = (n: number) => `€${n.toLocaleString('sr-RS', { minimumFractionD
 const fmtInt = (n: number) => n.toLocaleString('sr-RS', { maximumFractionDigits: 0 })
 const fmtPct = (n: number) => `${n.toLocaleString('sr-RS', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`
 
-type ChannelRow = { channel: string; bucket: string; spend: number; reach: number; impressions: number; clicks: number; conversions: number; conversion_value: number }
+type ChannelRow = { channel: string; bucket: string; spend: number; reach: number; impressions: number; clicks: number; conversions: number; conversion_value: number; platform_conversion_value: number }
 
 const MONTH_NAMES = ['januar', 'februar', 'mart', 'april', 'maj', 'jun', 'jul', 'avgust', 'septembar', 'oktobar', 'novembar', 'decembar']
 
@@ -94,7 +94,7 @@ export default function PpcMediaReport() {
       setError(null)
       const [cs, ce] = range!
       const [chRes, ga4Res, structRes] = await Promise.all([
-        supabase.rpc('fashion_rs_ppc_channel_summary', { p_client_id: selectedClientId, p_start: cs, p_end: ce }),
+        supabase.rpc('fashion_rs_ppc_channel_summary_v2', { p_client_id: selectedClientId, p_start: cs, p_end: ce }),
         supabase.rpc('ga4_paid_channel_verification', { p_client_id: selectedClientId, p_start: cs, p_end: ce }),
         supabase.rpc('fashion_rs_report_structure', { p_client_id: selectedClientId, p_start: cs, p_end: ce }),
       ])
@@ -225,8 +225,9 @@ export default function PpcMediaReport() {
                   <th className="py-2 pr-3 text-right font-normal">Klikovi</th>
                   <th className="py-2 pr-3 text-right font-normal">CTR</th>
                   <th className="py-2 pr-3 text-right font-normal">Konv.</th>
-                  <th className="py-2 pr-3 text-right font-normal">Revenue</th>
-                  <th className="py-2 text-right font-normal">ROAS</th>
+                  <th className="py-2 pr-3 text-right font-normal">Revenue (GA4)</th>
+                  <th className="py-2 pr-3 text-right font-normal">ROAS</th>
+                  <th className="py-2 text-right font-normal">Vrednost (platforma)</th>
                 </tr>
               </thead>
               <tbody>
@@ -248,7 +249,8 @@ export default function PpcMediaReport() {
                       <td className="py-2 pr-3 text-right font-mono">{fmtPct(ctr)}</td>
                       <td className="py-2 pr-3 text-right font-mono">{fmtInt(r.conversions)}</td>
                       <td className="py-2 pr-3 text-right font-mono">{fmtEUR(r.conversion_value)}</td>
-                      <td className="py-2 text-right font-mono">{r.spend > 0 ? `${roas.toFixed(2)}x` : '—'}</td>
+                      <td className="py-2 pr-3 text-right font-mono">{r.spend > 0 ? `${roas.toFixed(2)}x` : '—'}</td>
+                      <td className="py-2 text-right font-mono">{fmtEUR(r.platform_conversion_value ?? 0)}</td>
                     </tr>
                   )
                 })}
