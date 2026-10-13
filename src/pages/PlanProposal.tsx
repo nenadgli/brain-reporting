@@ -64,23 +64,70 @@ export default function PlanProposal() {
   const [message, setMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [transferring, setTransferring] = useState(false)
 
-  useEffect(() => {
-    supabase
+  const [clients, setClients] = useState<{ id: string; name: string }[]>([])
+  const [genClientId, setGenClientId] = useState('')
+  const [genMonth, setGenMonth] = useState(() => {
+    const d = new Date()
+    d.setMonth(d.getMonth() + 1)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  })
+  const [genTotal, setGenTotal] = useState('')
+  const [generating, setGenerating] = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)
+
+  async function loadProposals(selectId?: string) {
+    const { data, error: err } = await supabase
       .from('media_plan_proposals')
       .select('id, client_id, month, title, assumption, summary, checks, status, clients(name)')
       .order('month', { ascending: false })
-      .then(({ data, error: err }) => {
-        if (err) {
-          setError('Nije moguće učitati predloge.')
-          setLoading(false)
-          return
-        }
-        const list = (data ?? []) as unknown as Proposal[]
-        setProposals(list)
-        if (list.length > 0) setProposalId(list[0].id)
-        else setLoading(false)
+    if (err) {
+      setError('Nije moguće učitati predloge.')
+      setLoading(false)
+      return
+    }
+    const list = (data ?? []) as unknown as Proposal[]
+    setProposals(list)
+    if (selectId && list.some((p) => p.id === selectId)) setProposalId(selectId)
+    else if (list.length > 0) setProposalId((cur) => (list.some((p) => p.id === cur) ? cur : list[0].id))
+    else setLoading(false)
+  }
+
+  useEffect(() => {
+    loadProposals()
+    supabase
+      .from('clients')
+      .select('id, name')
+      .order('name')
+      .then(({ data }) => {
+        const list = data ?? []
+        setClients(list)
+        const ff = list.find((c) => c.name === 'Fashion&Friends RS')
+        if (list.length > 0) setGenClientId((ff ?? list[0]).id)
       })
   }, [])
+
+  async function generateProposal() {
+    if (!genClientId || !genMonth) return
+    const month = `${genMonth}-01`
+    const existing = proposals.find((p) => p.client_id === genClientId && p.month === month)
+    if (existing && !window.confirm(`Za ${monthLabel(month)} već postoji predlog. Napraviti novi? Linije postojećeg predloga se arhiviraju.`)) return
+    const total = genTotal.trim() ? Number(genTotal.replace(/\./g, '').replace(',', '.')) : null
+    if (total !== null && (!Number.isFinite(total) || total <= 0)) {
+      setMessage({ kind: 'err', text: 'Ukupan budžet mora biti pozitivan broj ili prazno polje.' })
+      return
+    }
+    setGenerating(true)
+    setMessage(null)
+    const { data, error: err } = await supabase.rpc('generate_media_plan_proposal', { p_client_id: genClientId, p_month: month, p_total: total })
+    setGenerating(false)
+    if (err) {
+      setMessage({ kind: 'err', text: `Predlog nije napravljen: ${err.message}` })
+      return
+    }
+    await loadProposals(data as string)
+    setReloadKey((k) => k + 1)
+    setMessage({ kind: 'ok', text: `Napravljen predlog za ${monthLabel(month)}. Pregledaj linije i datume akcija pre puštanja.` })
+  }
 
   const proposal = proposals.find((p) => p.id === proposalId) ?? null
 
@@ -94,7 +141,7 @@ export default function PlanProposal() {
       const mm = p.month.slice(5)
       const prevMonths = [`${y - 1}-${mm}`, `${y - 2}-${mm}`]
       const [lRes, hRes] = await Promise.all([
-        supabase.from('media_plan_proposal_lines').select('*').eq('proposal_id', p.id).order('sort'),
+        supabase.from('media_plan_proposal_lines').select('*').eq('proposal_id', p.id).eq('archived', false).order('sort'),
         supabase
           .from('media_plan_history')
           .select('month, network, channel, campaign_label, start_date, end_date, reported_spend, reported_revenue')
@@ -113,7 +160,7 @@ export default function PlanProposal() {
       setLoading(false)
     }
     load(proposal)
-  }, [proposalId])
+  }, [proposalId, reloadKey])
 
   const totals = useMemo(() => {
     const byNetwork: Record<string, { proposed: number; lastYear: number }> = {}
@@ -203,7 +250,6 @@ export default function PlanProposal() {
   }
 
   if (error) return <p className="text-[var(--color-rust)]">{error}</p>
-  if (!loading && proposals.length === 0) return <p className="text-sm text-[var(--color-ink-soft)]">Još nema predloga media plana.</p>
 
   const prevYearLabel = proposal ? monthLabel(`${Number(proposal.month.slice(0, 4)) - 1}${proposal.month.slice(4)}`) : ''
 
@@ -234,6 +280,42 @@ export default function PlanProposal() {
           {message.text}
         </p>
       )}
+
+      <section className="mb-10 rounded border border-dashed border-[var(--color-line)] bg-white p-5">
+        <p className="mb-1 text-sm font-medium">Napravi predlog</p>
+        <p className="mb-4 text-xs text-[var(--color-ink-soft)]">
+          Predlog se pravi iz media plana za isti mesec prošle godine i rezultata po liniji. Ako ostaviš budžet prazan, računa se iz plana za
+          prethodni mesec i sezonskog odnosa iz prošlih godina.
+        </p>
+        <div className="flex flex-wrap items-end gap-4">
+          <label className="text-sm">
+            <span className="mb-1 block text-[var(--color-ink-soft)]">Klijent</span>
+            <select value={genClientId} onChange={(e) => setGenClientId(e.target.value)} className="rounded border border-[var(--color-line)] bg-white px-3 py-1.5">
+              {clients.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block text-[var(--color-ink-soft)]">Mesec</span>
+            <input type="month" value={genMonth} onChange={(e) => setGenMonth(e.target.value)} className="rounded border border-[var(--color-line)] px-3 py-1.5" />
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block text-[var(--color-ink-soft)]">Ukupan budžet (opciono)</span>
+            <input value={genTotal} onChange={(e) => setGenTotal(e.target.value)} inputMode="numeric" placeholder="automatski" className="w-36 rounded border border-[var(--color-line)] px-3 py-1.5 text-right font-mono" />
+          </label>
+          <button
+            type="button"
+            onClick={generateProposal}
+            disabled={generating || !genClientId || !genMonth}
+            className="rounded bg-[var(--color-indigo)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          >
+            {generating ? 'Pravim…' : 'Napravi predlog'}
+          </button>
+        </div>
+      </section>
+
+      {!loading && proposals.length === 0 && <p className="text-sm text-[var(--color-ink-soft)]">Još nema predloga media plana.</p>}
 
       {!loading && proposal && (
         <>
