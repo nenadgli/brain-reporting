@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { strToU8, zipSync } from 'fflate'
 import { supabase } from '../lib/supabase'
+import { type AssetMode, type Attachment, type Brief, type ImageAsset, FIELD_LABEL, assetFileName, checkImage, downloadEditorPackage, imageSize } from '../lib/creatives'
+import PmaxAssetGroupForm from './PmaxAssetGroupForm'
 
 type ClientRow = { id: string; name: string; ga4_store: string | null }
 type Draft = {
@@ -14,67 +15,8 @@ type Draft = {
   created_at: string
 }
 
-type Brief = {
-  task_id: string
-  task_url: string
-  title: string
-  headline: string | null
-  duration_text: string | null
-  start_date: string | null
-  end_date: string | null
-  discount: string | null
-  applies_to: string | null
-  excludes: string | null
-  landing_page: string | null
-  copy: string | null
-  legal_line: string | null
-  created_at: string
-}
 
-type Attachment = {
-  id: string
-  task_id: string
-  task_title: string | null
-  from_subtask: boolean
-  name: string | null
-  content_type: string | null
-  size_bytes: number | null
-  url: string
-  thumb_url: string | null
-  productive_url: string | null
-}
-
-// Saved in the ad group draft; `file` is the name inside the images/ folder of the Editor package.
-type ImageAsset = { attachment_id: string; name: string; file: string; width: number; height: number; ratio: string }
-
-// Google Ads image assets: landscape 1.91:1, square 1:1, portrait 4:5; JPG/PNG/GIF up to 5 MB.
-const IMAGE_SHAPES = [
-  { ratio: '1.91:1', value: 1.91, minW: 600, minH: 314 },
-  { ratio: '1:1', value: 1, minW: 300, minH: 300 },
-  { ratio: '4:5', value: 0.8, minW: 480, minH: 600 },
-]
 const MAX_IMAGES = 20
-
-function checkImage(a: Attachment, w: number, h: number): { ratio: string } | { problem: string } {
-  if (!/^image\/(jpeg|png|gif)$/.test(a.content_type ?? '')) return { problem: 'format nije JPG/PNG/GIF' }
-  if ((a.size_bytes ?? 0) > 5 * 1024 * 1024) return { problem: 'veće od 5 MB' }
-  const shape = IMAGE_SHAPES.find((s) => Math.abs(w / h / s.value - 1) <= 0.02)
-  if (!shape) return { problem: `${w}×${h} nije 1.91:1, 1:1 ni 4:5` }
-  if (w < shape.minW || h < shape.minH) return { problem: `${w}×${h} je manje od ${shape.minW}×${shape.minH}` }
-  return { ratio: shape.ratio }
-}
-
-function imageSize(url: string): Promise<{ w: number; h: number }> {
-  return new Promise((resolve, reject) => {
-    const img = new Image()
-    img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight })
-    img.onerror = () => reject(new Error('slika se ne učitava'))
-    img.src = url
-  })
-}
-
-const assetFileName = (a: Attachment) =>
-  `${a.id}-${(a.name ?? 'image').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w.-]+/g, '_').slice(-80)}`
 
 const MARKETS = ['RS', 'HR', 'BA', 'ME', 'SI', 'AL']
 const CAMPAIGN_TYPES = ['Generic_Search', 'Brand_Search']
@@ -127,19 +69,6 @@ function parseKeyword(raw: string): { keyword: string; match_type: 'Exact' | 'Ph
   return { keyword: t, match_type: 'Phrase' }
 }
 
-function downloadBlob(filename: string, blob: Blob) {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
-}
-
-function downloadText(filename: string, text: string) {
-  downloadBlob(filename, new Blob(['' + text], { type: 'text/csv;charset=utf-8' }))
-}
-
 export default function CampaignBuilder() {
   const [clients, setClients] = useState<ClientRow[]>([])
   const [clientId, setClientId] = useState('')
@@ -171,6 +100,7 @@ export default function CampaignBuilder() {
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [attLoading, setAttLoading] = useState(false)
   const [attError, setAttError] = useState('')
+  const [mode, setMode] = useState<AssetMode>('search')
   const [images, setImages] = useState<ImageAsset[]>([])
   const [imageNotes, setImageNotes] = useState<Record<string, string>>({})
 
@@ -325,23 +255,35 @@ export default function CampaignBuilder() {
       setImages(images.filter((i) => i.attachment_id !== a.id))
       return
     }
-    if (images.length >= MAX_IMAGES) {
-      setImageNotes({ ...imageNotes, [a.id]: `najviše ${MAX_IMAGES} slika po ad grupi` })
+    if (images.length >= MAX_IMAGES + (mode === 'pmax' ? 5 : 0)) {
+      setImageNotes({ ...imageNotes, [a.id]: mode === 'pmax' ? `najviše ${MAX_IMAGES} slika i 5 logotipa` : `najviše ${MAX_IMAGES} slika po ad grupi` })
       return
     }
     setImageNotes({ ...imageNotes, [a.id]: 'proveravam dimenzije…' })
     try {
       const { w, h } = await imageSize(a.url)
-      const res = checkImage(a, w, h)
+      const res = checkImage(a, w, h, mode)
       if ('problem' in res) {
         setImageNotes((n) => ({ ...n, [a.id]: res.problem }))
         return
       }
-      setImageNotes((n) => ({ ...n, [a.id]: `${w}×${h} · ${res.ratio}` }))
-      setImages((list) => [...list, { attachment_id: a.id, name: a.name ?? '', file: assetFileName(a), width: w, height: h, ratio: res.ratio }])
+      setImageNotes((n) => ({ ...n, [a.id]: `${w}×${h} · ${mode === 'pmax' ? FIELD_LABEL[res.field] : res.ratio}` }))
+      setImages((list) => [...list, { attachment_id: a.id, name: a.name ?? '', file: assetFileName(a), width: w, height: h, ratio: res.ratio, field: res.field }])
     } catch (e) {
       setImageNotes((n) => ({ ...n, [a.id]: (e as Error).message }))
     }
+  }
+
+  function switchMode(m: AssetMode) {
+    setMode(m)
+    setImages([])
+    setImageNotes({})
+    setMessage(null)
+  }
+
+  // A square image picked for PMax can be either a marketing image or the logo.
+  function toggleLogo(id: string) {
+    setImages((list) => list.map((i) => (i.attachment_id !== id || i.ratio !== '1:1' ? i : { ...i, field: i.field === 'LOGO' ? 'SQUARE_MARKETING_IMAGE' : 'LOGO' })))
   }
 
   async function saveDraft() {
@@ -384,36 +326,12 @@ export default function CampaignBuilder() {
     // Image assets referenced by the exported ad groups go next to the CSV, in images/.
     const inScope = drafts.filter((d) => (ids ? ids.includes(d.id) : ['draft', 'approved', 'exported'].includes(d.status)))
     const assets = inScope.flatMap((d) => (d.kind === 'ad_group' ? ((d.payload.images as ImageAsset[] | undefined) ?? []) : []))
-    if (assets.length === 0) {
-      downloadText(`editor_${slug}_${label}.csv`, data)
-      setMessage({ kind: 'ok', text: 'CSV je preuzet. U Editoru: Import → proveri listu izmena → Post → uključi posle provere.' })
-      loadDrafts()
-      return
+    if (assets.length) {
+      setBusy(true)
+      setMessage({ kind: 'ok', text: `Pakujem ${assets.length} slika iz Productive-a…` })
     }
-    setBusy(true)
-    setMessage({ kind: 'ok', text: `Pakujem ${assets.length} slika iz Productive-a…` })
-    try {
-      const { data: fu, error: fe } = await supabase.functions.invoke('productive-briefs', {
-        body: { action: 'file_urls', ids: [...new Set(assets.map((a) => a.attachment_id))] },
-      })
-      if (fe || fu?.error) throw new Error(fu?.error ?? fe?.message)
-      const urlOf = new Map<string, string>((fu.files ?? []).map((f: Attachment) => [f.id, f.url]))
-      const files: Record<string, Uint8Array> = { 'editor.csv': strToU8(data) }
-      for (const a of assets) {
-        const url = urlOf.get(a.attachment_id)
-        if (!url) throw new Error(`slika ${a.name} više ne postoji u Productive-u`)
-        const r = await fetch(url)
-        if (!r.ok) throw new Error(`slika ${a.name}: HTTP ${r.status}`)
-        files[`images/${a.file}`] = new Uint8Array(await r.arrayBuffer())
-      }
-      // Images are already compressed; level 0 just stores them.
-      const zip = zipSync(files, { level: 0 })
-      downloadBlob(`editor_${slug}_${label}.zip`, new Blob([zip as BlobPart], { type: 'application/zip' }))
-      setMessage({ kind: 'ok', text: `Paket je preuzet (CSV + ${assets.length} slika). Otpakuj ga, pa u Editoru: Import → From file → editor.csv iz tog foldera → proveri izmene → Post.` })
-    } catch (e) {
-      downloadText(`editor_${slug}_${label}.csv`, data)
-      setMessage({ kind: 'err', text: `Slike nisu spakovane (${(e as Error).message}). Preuzet je samo CSV; kolona Image očekuje folder images/ pored njega.` })
-    }
+    const res = await downloadEditorPackage(`editor_${slug}_${label}`, data, assets)
+    setMessage({ kind: res.ok ? 'ok' : 'err', text: res.text })
     setBusy(false)
     loadDrafts()
   }
@@ -458,6 +376,15 @@ export default function CampaignBuilder() {
         </label>
       </header>
 
+      <div className="mb-6 inline-flex rounded border border-[var(--color-line)] bg-white p-0.5 text-sm">
+        {([['search', 'Search kampanja'], ['pmax', 'PMax asset grupa']] as const).map(([m, label]) => (
+          <button key={m} type="button" onClick={() => switchMode(m)}
+            className={`rounded px-4 py-1.5 ${mode === m ? 'bg-[var(--color-indigo)] text-white' : 'text-[var(--color-ink-soft)]'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
       {message && (
         <p className={`mb-6 rounded px-4 py-2 text-sm ${message.kind === 'ok' ? 'bg-[var(--color-indigo-soft)] text-[var(--color-indigo-dark)]' : 'bg-red-50 text-[var(--color-rust)]'}`}>
           {message.text}
@@ -491,14 +418,16 @@ export default function CampaignBuilder() {
               ))}
             </select>
           </label>
-          <button
-            type="button"
-            onClick={draftFromBrief}
-            disabled={!brief || drafting}
-            className="rounded border border-[var(--color-indigo)] px-4 py-2 text-sm font-medium text-[var(--color-indigo)] disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {drafting ? 'Pišem oglase…' : 'Popuni formu iz briefa'}
-          </button>
+          {mode === 'search' && (
+            <button
+              type="button"
+              onClick={draftFromBrief}
+              disabled={!brief || drafting}
+              className="rounded border border-[var(--color-indigo)] px-4 py-2 text-sm font-medium text-[var(--color-indigo)] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {drafting ? 'Pišem oglase…' : 'Popuni formu iz briefa'}
+            </button>
+          )}
         </div>
         {brief && (
           <dl className="mt-4 grid grid-cols-1 gap-x-6 gap-y-1 text-xs md:grid-cols-2">
@@ -527,7 +456,9 @@ export default function CampaignBuilder() {
             <p className="mb-1 text-sm font-medium">Kreative i prilozi{attachments.length ? ` · ${attachments.length}` : ''}</p>
             <p className="mb-3 text-xs text-[var(--color-ink-soft)]">
               Iz taska, podtaskova i komentara, čitaju se direktno iz Productive-a (ništa se ne kopira). Linkovi važe dva sata.
-              Čekiraj „u Editor“ za slike koje idu kao image assets uz ad grupu ({images.length}/{MAX_IMAGES}); dimenzije se proveravaju odmah.
+              {mode === 'pmax'
+                ? <>Čekiraj „u asset grupu“ za slike i logotipe asset grupe ({images.length} izabrano); tip se prepoznaje po dimenzijama.</>
+                : <>Čekiraj „u Editor“ za slike koje idu kao image assets uz ad grupu ({images.length}/{MAX_IMAGES}); dimenzije se proveravaju odmah.</>}
             </p>
             {attLoading && <p className="text-xs text-[var(--color-ink-soft)]">Učitavam priloge iz Productive-a…</p>}
             {attError && <p className="text-xs text-[var(--color-rust)]">Prilozi nisu učitani: {attError}</p>}
@@ -560,10 +491,16 @@ export default function CampaignBuilder() {
                           {isImage && (
                             <label className="mt-1 flex items-center gap-1">
                               <input type="checkbox" checked={picked} onChange={() => toggleImage(a)} />
-                              <span>u Editor</span>
+                              <span>{mode === 'pmax' ? 'u asset grupu' : 'u Editor'}</span>
                             </label>
                           )}
                           {imageNotes[a.id] && <span className={`block ${picked ? 'text-[var(--color-ink-soft)]' : 'text-[var(--color-rust)]'}`}>{imageNotes[a.id]}</span>}
+                          {picked && mode === 'pmax' && images.find((i) => i.attachment_id === a.id)?.ratio === '1:1' && (
+                            <label className="mt-0.5 flex items-center gap-1">
+                              <input type="checkbox" checked={images.find((i) => i.attachment_id === a.id)?.field === 'LOGO'} onChange={() => toggleLogo(a.id)} />
+                              <span>ovo je logo</span>
+                            </label>
+                          )}
                         </figcaption>
                       </figure>
                     )
@@ -575,6 +512,18 @@ export default function CampaignBuilder() {
         )}
       </section>
 
+      {mode === 'pmax' && client && (
+        <PmaxAssetGroupForm
+          client={client}
+          market={market}
+          brief={brief}
+          images={images}
+          onSaved={() => { setImages([]); setImageNotes({}) }}
+          onMessage={setMessage}
+        />
+      )}
+
+      {mode === 'search' && (<>
       <section className="mb-12">
         <h2 className="font-display mb-4 text-xl font-medium">Nova Search kampanja</h2>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
@@ -681,6 +630,7 @@ export default function CampaignBuilder() {
           })}
         </div>
       </section>
+      </>)}
     </div>
   )
 }
