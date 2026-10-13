@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { strToU8, zipSync } from 'fflate'
 import { supabase } from '../lib/supabase'
 
 type ClientRow = { id: string; name: string; ga4_store: string | null }
@@ -38,9 +39,42 @@ type Attachment = {
   name: string | null
   content_type: string | null
   size_bytes: number | null
-  url: string | null
-  error: string | null
+  url: string
+  thumb_url: string | null
+  productive_url: string | null
 }
+
+// Saved in the ad group draft; `file` is the name inside the images/ folder of the Editor package.
+type ImageAsset = { attachment_id: string; name: string; file: string; width: number; height: number; ratio: string }
+
+// Google Ads image assets: landscape 1.91:1, square 1:1, portrait 4:5; JPG/PNG/GIF up to 5 MB.
+const IMAGE_SHAPES = [
+  { ratio: '1.91:1', value: 1.91, minW: 600, minH: 314 },
+  { ratio: '1:1', value: 1, minW: 300, minH: 300 },
+  { ratio: '4:5', value: 0.8, minW: 480, minH: 600 },
+]
+const MAX_IMAGES = 20
+
+function checkImage(a: Attachment, w: number, h: number): { ratio: string } | { problem: string } {
+  if (!/^image\/(jpeg|png|gif)$/.test(a.content_type ?? '')) return { problem: 'format nije JPG/PNG/GIF' }
+  if ((a.size_bytes ?? 0) > 5 * 1024 * 1024) return { problem: 'veće od 5 MB' }
+  const shape = IMAGE_SHAPES.find((s) => Math.abs(w / h / s.value - 1) <= 0.02)
+  if (!shape) return { problem: `${w}×${h} nije 1.91:1, 1:1 ni 4:5` }
+  if (w < shape.minW || h < shape.minH) return { problem: `${w}×${h} je manje od ${shape.minW}×${shape.minH}` }
+  return { ratio: shape.ratio }
+}
+
+function imageSize(url: string): Promise<{ w: number; h: number }> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight })
+    img.onerror = () => reject(new Error('slika se ne učitava'))
+    img.src = url
+  })
+}
+
+const assetFileName = (a: Attachment) =>
+  `${a.id}-${(a.name ?? 'image').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w.-]+/g, '_').slice(-80)}`
 
 const MARKETS = ['RS', 'HR', 'BA', 'ME', 'SI', 'AL']
 const CAMPAIGN_TYPES = ['Generic_Search', 'Brand_Search']
@@ -93,14 +127,17 @@ function parseKeyword(raw: string): { keyword: string; match_type: 'Exact' | 'Ph
   return { keyword: t, match_type: 'Phrase' }
 }
 
-function downloadText(filename: string, text: string) {
-  const blob = new Blob(['' + text], { type: 'text/csv;charset=utf-8' })
+function downloadBlob(filename: string, blob: Blob) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
   a.download = filename
   a.click()
   URL.revokeObjectURL(url)
+}
+
+function downloadText(filename: string, text: string) {
+  downloadBlob(filename, new Blob(['' + text], { type: 'text/csv;charset=utf-8' }))
 }
 
 export default function CampaignBuilder() {
@@ -134,6 +171,8 @@ export default function CampaignBuilder() {
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [attLoading, setAttLoading] = useState(false)
   const [attError, setAttError] = useState('')
+  const [images, setImages] = useState<ImageAsset[]>([])
+  const [imageNotes, setImageNotes] = useState<Record<string, string>>({})
 
   useEffect(() => {
     supabase.from('clients').select('id, name, ga4_store').order('name').then(({ data }) => {
@@ -243,6 +282,8 @@ export default function CampaignBuilder() {
   useEffect(() => {
     setAttachments([])
     setAttError('')
+    setImages([])
+    setImageNotes({})
     if (!briefId) return
     let cancelled = false
     setAttLoading(true)
@@ -279,6 +320,30 @@ export default function CampaignBuilder() {
       (data.dropped_too_long?.length ? ` Izbačeno jer je predugo: ${data.dropped_too_long.length}.` : ''))
   }
 
+  async function toggleImage(a: Attachment) {
+    if (images.some((i) => i.attachment_id === a.id)) {
+      setImages(images.filter((i) => i.attachment_id !== a.id))
+      return
+    }
+    if (images.length >= MAX_IMAGES) {
+      setImageNotes({ ...imageNotes, [a.id]: `najviše ${MAX_IMAGES} slika po ad grupi` })
+      return
+    }
+    setImageNotes({ ...imageNotes, [a.id]: 'proveravam dimenzije…' })
+    try {
+      const { w, h } = await imageSize(a.url)
+      const res = checkImage(a, w, h)
+      if ('problem' in res) {
+        setImageNotes((n) => ({ ...n, [a.id]: res.problem }))
+        return
+      }
+      setImageNotes((n) => ({ ...n, [a.id]: `${w}×${h} · ${res.ratio}` }))
+      setImages((list) => [...list, { attachment_id: a.id, name: a.name ?? '', file: assetFileName(a), width: w, height: h, ratio: res.ratio }])
+    } catch (e) {
+      setImageNotes((n) => ({ ...n, [a.id]: (e as Error).message }))
+    }
+  }
+
   async function saveDraft() {
     if (problems.length || !clientId) return
     setBusy(true)
@@ -287,7 +352,7 @@ export default function CampaignBuilder() {
     const ag = adGroup.trim()
     const rows = [
       { kind: 'campaign', campaign_name: camp, ad_group_name: null, payload: { campaign_type: 'Search', daily_budget: parseFloat(budget) } },
-      { kind: 'ad_group', campaign_name: camp, ad_group_name: ag, payload: {} },
+      { kind: 'ad_group', campaign_name: camp, ad_group_name: ag, payload: images.length ? { images } : {} },
       { kind: 'rsa', campaign_name: camp, ad_group_name: ag, payload: { headlines: hl, descriptions: ds, final_url: finalUrl.trim(), path1: path1.trim(), path2: path2.trim() } },
       ...kw.map((k) => ({ kind: 'keyword', campaign_name: camp, ad_group_name: ag, payload: k })),
       ...neg.map((k) => ({ kind: 'negative_keyword', campaign_name: camp, ad_group_name: null, payload: k })),
@@ -298,7 +363,8 @@ export default function CampaignBuilder() {
       setMessage({ kind: 'err', text: `Čuvanje nije uspelo: ${error.message}` })
       return
     }
-    setMessage({ kind: 'ok', text: `Nacrt sačuvan (${rows.length} redova). Sve se izvozi kao Paused.` })
+    setMessage({ kind: 'ok', text: `Nacrt sačuvan (${rows.length} redova${images.length ? `, ${images.length} slika` : ''}). Sve se izvozi kao Paused.` })
+    setImages([])
     setName(''); setAdGroup(''); setHeadlines(''); setDescriptions(''); setKeywords(''); setNegatives('')
     loadDrafts()
   }
@@ -315,8 +381,40 @@ export default function CampaignBuilder() {
       return
     }
     const slug = (client?.name ?? 'klijent').toLowerCase().replace(/[^a-z0-9]+/g, '-')
-    downloadText(`editor_${slug}_${label}.csv`, data)
-    setMessage({ kind: 'ok', text: 'CSV je preuzet. U Editoru: Import → proveri listu izmena → Post → uključi posle provere.' })
+    // Image assets referenced by the exported ad groups go next to the CSV, in images/.
+    const inScope = drafts.filter((d) => (ids ? ids.includes(d.id) : ['draft', 'approved', 'exported'].includes(d.status)))
+    const assets = inScope.flatMap((d) => (d.kind === 'ad_group' ? ((d.payload.images as ImageAsset[] | undefined) ?? []) : []))
+    if (assets.length === 0) {
+      downloadText(`editor_${slug}_${label}.csv`, data)
+      setMessage({ kind: 'ok', text: 'CSV je preuzet. U Editoru: Import → proveri listu izmena → Post → uključi posle provere.' })
+      loadDrafts()
+      return
+    }
+    setBusy(true)
+    setMessage({ kind: 'ok', text: `Pakujem ${assets.length} slika iz Productive-a…` })
+    try {
+      const { data: fu, error: fe } = await supabase.functions.invoke('productive-briefs', {
+        body: { action: 'file_urls', ids: [...new Set(assets.map((a) => a.attachment_id))] },
+      })
+      if (fe || fu?.error) throw new Error(fu?.error ?? fe?.message)
+      const urlOf = new Map<string, string>((fu.files ?? []).map((f: Attachment) => [f.id, f.url]))
+      const files: Record<string, Uint8Array> = { 'editor.csv': strToU8(data) }
+      for (const a of assets) {
+        const url = urlOf.get(a.attachment_id)
+        if (!url) throw new Error(`slika ${a.name} više ne postoji u Productive-u`)
+        const r = await fetch(url)
+        if (!r.ok) throw new Error(`slika ${a.name}: HTTP ${r.status}`)
+        files[`images/${a.file}`] = new Uint8Array(await r.arrayBuffer())
+      }
+      // Images are already compressed; level 0 just stores them.
+      const zip = zipSync(files, { level: 0 })
+      downloadBlob(`editor_${slug}_${label}.zip`, new Blob([zip as BlobPart], { type: 'application/zip' }))
+      setMessage({ kind: 'ok', text: `Paket je preuzet (CSV + ${assets.length} slika). Otpakuj ga, pa u Editoru: Import → From file → editor.csv iz tog foldera → proveri izmene → Post.` })
+    } catch (e) {
+      downloadText(`editor_${slug}_${label}.csv`, data)
+      setMessage({ kind: 'err', text: `Slike nisu spakovane (${(e as Error).message}). Preuzet je samo CSV; kolona Image očekuje folder images/ pored njega.` })
+    }
+    setBusy(false)
     loadDrafts()
   }
 
@@ -428,9 +526,10 @@ export default function CampaignBuilder() {
           <div className="mt-5 border-t border-[var(--color-line)] pt-4">
             <p className="mb-1 text-sm font-medium">Kreative i prilozi{attachments.length ? ` · ${attachments.length}` : ''}</p>
             <p className="mb-3 text-xs text-[var(--color-ink-soft)]">
-              Iz taska, podtaskova i komentara. Prvo otvaranje kopira fajlove iz Productive-a, pa može da potraje; linkovi važe sat vremena.
+              Iz taska, podtaskova i komentara, čitaju se direktno iz Productive-a (ništa se ne kopira). Linkovi važe dva sata.
+              Čekiraj „u Editor“ za slike koje idu kao image assets uz ad grupu ({images.length}/{MAX_IMAGES}); dimenzije se proveravaju odmah.
             </p>
-            {attLoading && <p className="text-xs text-[var(--color-ink-soft)]">Preuzimam priloge iz Productive-a…</p>}
+            {attLoading && <p className="text-xs text-[var(--color-ink-soft)]">Učitavam priloge iz Productive-a…</p>}
             {attError && <p className="text-xs text-[var(--color-rust)]">Prilozi nisu učitani: {attError}</p>}
             {!attLoading && !attError && attachments.length === 0 && <p className="text-xs text-[var(--color-ink-soft)]">Task nema priloga.</p>}
             {groupAttachments(attachments).map(([group, list]) => (
@@ -439,26 +538,32 @@ export default function CampaignBuilder() {
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
                   {list.map((a) => {
                     const ct = a.content_type ?? ''
+                    const isImage = ct.startsWith('image/')
+                    const picked = images.some((i) => i.attachment_id === a.id)
                     return (
-                      <figure key={a.id} className="overflow-hidden rounded border border-[var(--color-line)] bg-slate-50">
-                        <div className="flex aspect-square items-center justify-center bg-slate-100">
-                          {a.url && ct.startsWith('image/') ? (
-                            <a href={a.url} target="_blank" rel="noreferrer" className="block h-full w-full">
-                              <img src={a.url} alt={a.name ?? ''} loading="lazy" className="h-full w-full object-contain" />
-                            </a>
-                          ) : a.url && ct.startsWith('video/') ? (
-                            <video src={a.url} controls preload="metadata" className="h-full w-full bg-black object-contain" />
+                      <figure key={a.id} className={`overflow-hidden rounded border bg-slate-50 ${picked ? 'border-[var(--color-indigo)] ring-2 ring-[var(--color-indigo)]' : 'border-[var(--color-line)]'}`}>
+                        <a href={a.url} target="_blank" rel="noreferrer" className="flex aspect-square items-center justify-center bg-slate-100">
+                          {isImage && a.thumb_url ? (
+                            <img src={a.thumb_url} alt={a.name ?? ''} loading="lazy" className="h-full w-full object-contain" />
                           ) : (
-                            <span className="px-2 text-center text-xs uppercase text-[var(--color-ink-soft)]">{(a.name ?? '').split('.').pop() || 'fajl'}</span>
+                            <span className="px-2 text-center text-xs uppercase text-[var(--color-ink-soft)]">
+                              {ct.startsWith('video/') ? '▶ video' : (a.name ?? '').split('.').pop() || 'fajl'}
+                            </span>
                           )}
-                        </div>
+                        </a>
                         <figcaption className="px-2 py-1.5 text-[11px] leading-tight">
                           <span className="block truncate" title={a.name ?? ''}>{a.name}</span>
                           <span className="text-[var(--color-ink-soft)]">
                             {fileSize(a.size_bytes)}
-                            {a.url && <> · <a href={a.url} target="_blank" rel="noreferrer" download={a.name ?? undefined} className="underline">preuzmi</a></>}
-                            {a.error && <span className="text-[var(--color-rust)]"> · {a.error}</span>}
+                            {a.productive_url && <> · <a href={a.productive_url} target="_blank" rel="noreferrer" className="underline">Productive</a></>}
                           </span>
+                          {isImage && (
+                            <label className="mt-1 flex items-center gap-1">
+                              <input type="checkbox" checked={picked} onChange={() => toggleImage(a)} />
+                              <span>u Editor</span>
+                            </label>
+                          )}
+                          {imageNotes[a.id] && <span className={`block ${picked ? 'text-[var(--color-ink-soft)]' : 'text-[var(--color-rust)]'}`}>{imageNotes[a.id]}</span>}
                         </figcaption>
                       </figure>
                     )
@@ -548,6 +653,7 @@ export default function CampaignBuilder() {
             const ids = rows.map((r) => r.id)
             const count = (k: Draft['kind']) => rows.filter((r) => r.kind === k).length
             const budgetVal = rows.find((r) => r.kind === 'campaign')?.payload?.daily_budget
+            const imageCount = rows.reduce((n, r) => n + (r.kind === 'ad_group' ? ((r.payload.images as ImageAsset[] | undefined)?.length ?? 0) : 0), 0)
             return (
               <div key={camp} className="rounded border border-[var(--color-line)] p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -555,11 +661,12 @@ export default function CampaignBuilder() {
                     <p className="text-sm font-medium">{camp}</p>
                     <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
                       {STATUS_LABEL[status]} · budžet {budgetVal ? `${budgetVal} €/dan` : '—'} · {count('keyword')} ključnih reči · {count('negative_keyword')} negativnih · {rows.find((r) => r.kind === 'rsa') ? 'RSA ✓' : 'bez RSA'}
+                      {imageCount > 0 && ` · ${imageCount} slika`}
                     </p>
                   </div>
                   <div className="flex gap-2 text-xs">
                     {['draft', 'approved', 'exported'].includes(status) && (
-                      <button onClick={() => exportCsv(ids, 'kampanja')} disabled={busy} className="rounded border border-[var(--color-indigo)] px-3 py-1 text-[var(--color-indigo-dark)]">Izvezi CSV</button>
+                      <button onClick={() => exportCsv(ids, 'kampanja')} disabled={busy} className="rounded border border-[var(--color-indigo)] px-3 py-1 text-[var(--color-indigo-dark)]">{imageCount > 0 ? 'Izvezi paket (CSV + slike)' : 'Izvezi CSV'}</button>
                     )}
                     {status === 'exported' && (
                       <button onClick={() => setStatus(ids, 'published')} className="rounded border border-[var(--color-line)] px-3 py-1">Označi kao objavljeno</button>
