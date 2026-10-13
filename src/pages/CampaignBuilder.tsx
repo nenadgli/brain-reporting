@@ -65,6 +65,8 @@ export default function CampaignBuilder() {
   const [descriptions, setDescriptions] = useState('')
   const [keywords, setKeywords] = useState('')
   const [negatives, setNegatives] = useState('')
+  const [suggesting, setSuggesting] = useState(false)
+  const [rationale, setRationale] = useState('')
 
   useEffect(() => {
     supabase.from('clients').select('id, name, ga4_store').order('name').then(({ data }) => {
@@ -119,6 +121,27 @@ export default function CampaignBuilder() {
   if (path1.length > MAX_PATH || path2.length > MAX_PATH) problems.push(`Path može imati najviše ${MAX_PATH} znakova.`)
   if (kw.length === 0) problems.push('Dodaj bar jednu ključnu reč.')
   if (new Set(hl).size !== hl.length) problems.push('Naslovi se ponavljaju.')
+
+  async function suggest() {
+    if (!clientId || !name.trim()) return
+    setSuggesting(true); setMessage(null); setRationale('')
+    const { data, error } = await supabase.functions.invoke('suggest-campaign', {
+      body: { client_id: clientId, theme: name.trim(), ct: ctype, market },
+    })
+    setSuggesting(false)
+    if (error || !data || data.error) {
+      setMessage({ kind: 'err', text: `Predlog nije uspeo: ${data?.error ?? error?.message ?? 'nepoznata greška'}` })
+      return
+    }
+    setAdGroup(data.ad_group ?? ''); setFinalUrl(data.final_url ?? '')
+    setPath1(data.path1 ?? ''); setPath2(data.path2 ?? '')
+    if (data.daily_budget && !budget) setBudget(String(data.daily_budget))
+    setHeadlines((data.headlines ?? []).join('\n')); setDescriptions((data.descriptions ?? []).join('\n'))
+    setKeywords((data.keywords ?? []).join('\n')); setNegatives((data.negatives ?? []).join('\n'))
+    const m = data.meta ?? {}
+    setRationale(`${data.rationale ?? ''} (search termi: ${m.search_terms ?? 0}, keyword-i: ${m.keywords ?? 0}, oglasi u uzorku: ${m.ad_samples ?? 0})` +
+      (data.dropped_too_long?.length ? ` Izbačeno jer je predugo: ${data.dropped_too_long.length}.` : ''))
+  }
 
   async function saveDraft() {
     if (problems.length || !clientId) return
@@ -224,6 +247,14 @@ export default function CampaignBuilder() {
             Ime u Editoru: <code className="rounded bg-slate-100 px-1.5 py-0.5">{campaignName || 'LB_… (Mkt:XX;Ct:…)'}</code>
             &nbsp;— isto ime mora biti u UTM-u (<code>utm_campaign</code>) da GA4 revenue radi.
           </p>
+          <div className="md:col-span-4 flex flex-wrap items-center gap-3">
+            <button type="button" onClick={suggest} disabled={suggesting || !name.trim() || !clientId}
+              className="rounded border border-[var(--color-indigo)] px-4 py-2 text-sm font-medium text-[var(--color-indigo)] disabled:cursor-not-allowed disabled:opacity-40">
+              {suggesting ? 'Generišem…' : 'Generiši predlog iz podataka'}
+            </button>
+            <span className="text-xs text-[var(--color-ink-soft)]">Upiši temu u „Naziv", izaberi tip, pa klikni. Sve polja možeš da izmeniš pre čuvanja.</span>
+          </div>
+          {rationale && <p className="md:col-span-4 rounded bg-[var(--color-indigo-soft)] px-4 py-2 text-xs text-[var(--color-indigo-dark)]">{rationale}</p>}
           <label><span className={labelCls}>Dnevni budžet (€)</span>
             <input value={budget} onChange={(e) => setBudget(e.target.value)} inputMode="decimal" className={inputCls} /></label>
           <label className="md:col-span-3"><span className={labelCls}>Ad grupa</span>
