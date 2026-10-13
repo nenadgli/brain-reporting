@@ -13,11 +13,44 @@ type Draft = {
   created_at: string
 }
 
+type Brief = {
+  task_id: string
+  task_url: string
+  title: string
+  headline: string | null
+  duration_text: string | null
+  start_date: string | null
+  end_date: string | null
+  discount: string | null
+  applies_to: string | null
+  excludes: string | null
+  landing_page: string | null
+  copy: string | null
+  legal_line: string | null
+  created_at: string
+}
+
 const MARKETS = ['RS', 'HR', 'BA', 'ME', 'SI', 'AL']
 const CAMPAIGN_TYPES = ['Generic_Search', 'Brand_Search']
 const MAX_HEADLINE = 30
 const MAX_DESCRIPTION = 90
 const MAX_PATH = 15
+
+// Productive project names use the country name instead of the market code.
+const MARKET_COUNTRY: Record<string, string> = { RS: 'srbija', HR: 'hrvatska', BA: 'bosna', ME: 'crna gora', SI: 'slovenia', AL: 'albanija' }
+
+function guessProject(projects: { productive_id: string; name: string }[], clientName: string, market: string): string {
+  const words = clientName.toLowerCase().replace(/\b(rs|hr|ba|me|si|al)\b/g, '').split(/\s+/).filter((w) => w.length > 2)
+  const country = MARKET_COUNTRY[market] ?? ''
+  const scored = projects.map((p) => {
+    const n = p.name.toLowerCase()
+    return { id: p.productive_id, score: words.filter((w) => n.includes(w)).length * 2 + (country && n.includes(country) ? 1 : 0) }
+  })
+  scored.sort((a, b) => b.score - a.score)
+  return scored[0] && scored[0].score > 0 ? scored[0].id : ''
+}
+
+const shortDate = (d: string | null) => (d ? `${Number(d.slice(8, 10))}.${Number(d.slice(5, 7))}.` : '')
 
 const STATUS_LABEL: Record<Draft['status'], string> = {
   draft: 'Nacrt', approved: 'Odobreno', exported: 'Izvezeno', published: 'Objavljeno', rejected: 'Odbačeno',
@@ -67,6 +100,12 @@ export default function CampaignBuilder() {
   const [negatives, setNegatives] = useState('')
   const [suggesting, setSuggesting] = useState(false)
   const [rationale, setRationale] = useState('')
+  const [projects, setProjects] = useState<{ productive_id: string; name: string }[]>([])
+  const [projectId, setProjectId] = useState('')
+  const [briefs, setBriefs] = useState<Brief[]>([])
+  const [briefId, setBriefId] = useState('')
+  const [briefLoading, setBriefLoading] = useState(false)
+  const [drafting, setDrafting] = useState(false)
 
   useEffect(() => {
     supabase.from('clients').select('id, name, ga4_store').order('name').then(({ data }) => {
@@ -140,6 +179,56 @@ export default function CampaignBuilder() {
     setKeywords((data.keywords ?? []).join('\n')); setNegatives((data.negatives ?? []).join('\n'))
     const m = data.meta ?? {}
     setRationale(`${data.rationale ?? ''} (search termi: ${m.search_terms ?? 0}, keyword-i: ${m.keywords ?? 0}, oglasi u uzorku: ${m.ad_samples ?? 0})` +
+      (data.dropped_too_long?.length ? ` Izbačeno jer je predugo: ${data.dropped_too_long.length}.` : ''))
+  }
+
+  // Productive briefs (via Feed Hub): load projects once, pick the client's project, list its briefs.
+  useEffect(() => {
+    supabase.functions.invoke('productive-briefs', { body: { action: 'projects' } }).then(({ data }) => {
+      if (data?.projects) setProjects(data.projects)
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!client || projects.length === 0) return
+    setProjectId(guessProject(projects, client.name, market))
+  }, [client?.id, market, projects.length])
+
+  useEffect(() => {
+    setBriefs([])
+    setBriefId('')
+    if (!projectId) return
+    setBriefLoading(true)
+    supabase.functions.invoke('productive-briefs', { body: { action: 'briefs', project_id: projectId } }).then(({ data, error }) => {
+      setBriefLoading(false)
+      if (error || data?.error) {
+        setMessage({ kind: 'err', text: `Briefovi nisu učitani: ${data?.error ?? error?.message}` })
+        return
+      }
+      setBriefs(data?.briefs ?? [])
+    })
+  }, [projectId])
+
+  const brief = briefs.find((b) => b.task_id === briefId) ?? null
+
+  async function draftFromBrief() {
+    if (!brief || !client) return
+    setDrafting(true); setMessage(null); setRationale('')
+    const { data, error } = await supabase.functions.invoke('productive-briefs', {
+      body: { action: 'draft', brief, client_name: client.name, market, ct: ctype },
+    })
+    setDrafting(false)
+    if (error || !data || data.error) {
+      setMessage({ kind: 'err', text: `Nacrt iz briefa nije uspeo: ${data?.error ?? error?.message ?? 'nepoznata greška'}` })
+      return
+    }
+    setName(data.theme ?? brief.headline ?? '')
+    setAdGroup(data.ad_group ?? ''); setFinalUrl(data.final_url ?? '')
+    setPath1(data.path1 ?? ''); setPath2(data.path2 ?? '')
+    setHeadlines((data.headlines ?? []).join('\n')); setDescriptions((data.descriptions ?? []).join('\n'))
+    setKeywords((data.keywords ?? []).join('\n'))
+    const period = brief.start_date ? ` Period akcije: ${shortDate(brief.start_date)}${brief.end_date && brief.end_date !== brief.start_date ? ` – ${shortDate(brief.end_date)}` : ''}; kampanju pusti i zaustavi u tom periodu.` : ''
+    setRationale(`Iz Productive briefa „${brief.title}“. ${data.rationale ?? ''}${period}` +
       (data.dropped_too_long?.length ? ` Izbačeno jer je predugo: ${data.dropped_too_long.length}.` : ''))
   }
 
@@ -229,6 +318,66 @@ export default function CampaignBuilder() {
           {message.text}
         </p>
       )}
+
+      <section className="mb-10 rounded border border-dashed border-[var(--color-line)] bg-white p-5">
+        <p className="mb-1 text-sm font-medium">Uvezi iz Productive briefa</p>
+        <p className="mb-4 text-xs text-[var(--color-ink-soft)]">
+          Briefovi akcija iz Productive-a (preko Feed Hub-a, osvežava se svako jutro). Izaberi akciju, pa popuni formu: naslovi i opisi se pišu
+          samo iz briefa (popust, period, uslovi, legal line), a ti ih pregledaš pre čuvanja.
+        </p>
+        <div className="flex flex-wrap items-end gap-4">
+          <label className="text-sm">
+            <span className="mb-1 block text-[var(--color-ink-soft)]">Productive projekat</span>
+            <select value={projectId} onChange={(e) => setProjectId(e.target.value)} className="max-w-64 rounded border border-[var(--color-line)] bg-white px-3 py-1.5">
+              <option value="">— izaberi —</option>
+              {projects.map((p) => (
+                <option key={p.productive_id} value={p.productive_id}>{p.name}</option>
+              ))}
+            </select>
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block text-[var(--color-ink-soft)]">Akcija</span>
+            <select value={briefId} onChange={(e) => setBriefId(e.target.value)} disabled={briefLoading || briefs.length === 0} className="max-w-80 rounded border border-[var(--color-line)] bg-white px-3 py-1.5">
+              <option value="">{briefLoading ? 'Učitavam…' : briefs.length ? '— izaberi —' : 'nema briefova'}</option>
+              {briefs.map((b) => (
+                <option key={b.task_id} value={b.task_id}>
+                  {`${b.title}${b.start_date ? ` · ${shortDate(b.start_date)}${b.end_date && b.end_date !== b.start_date ? `–${shortDate(b.end_date)}` : ''}` : ''}${b.discount ? ` · ${b.discount}` : ''}`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={draftFromBrief}
+            disabled={!brief || drafting}
+            className="rounded border border-[var(--color-indigo)] px-4 py-2 text-sm font-medium text-[var(--color-indigo)] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {drafting ? 'Pišem oglase…' : 'Popuni formu iz briefa'}
+          </button>
+        </div>
+        {brief && (
+          <dl className="mt-4 grid grid-cols-1 gap-x-6 gap-y-1 text-xs md:grid-cols-2">
+            {[
+              ['Akcija', brief.headline],
+              ['Trajanje', brief.duration_text],
+              ['Popust', brief.discount],
+              ['Odnosi se na', brief.applies_to],
+              ['Isključuje', brief.excludes],
+              ['Landing page', brief.landing_page],
+              ['Copy', brief.copy],
+              ['Legal line', brief.legal_line],
+            ].filter(([, v]) => v).map(([k, v]) => (
+              <div key={k} className={k === 'Legal line' || k === 'Copy' ? 'md:col-span-2' : ''}>
+                <dt className="inline text-[var(--color-ink-soft)]">{k}: </dt>
+                <dd className="inline whitespace-pre-line">{v}</dd>
+              </div>
+            ))}
+            <div className="md:col-span-2">
+              <a href={brief.task_url} target="_blank" rel="noreferrer" className="text-[var(--color-indigo-dark)] underline">Otvori task u Productive-u</a>
+            </div>
+          </dl>
+        )}
+      </section>
 
       <section className="mb-12">
         <h2 className="font-display mb-4 text-xl font-medium">Nova Search kampanja</h2>
