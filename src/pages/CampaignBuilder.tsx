@@ -30,6 +30,18 @@ type Brief = {
   created_at: string
 }
 
+type Attachment = {
+  id: string
+  task_id: string
+  task_title: string | null
+  from_subtask: boolean
+  name: string | null
+  content_type: string | null
+  size_bytes: number | null
+  url: string | null
+  error: string | null
+}
+
 const MARKETS = ['RS', 'HR', 'BA', 'ME', 'SI', 'AL']
 const CAMPAIGN_TYPES = ['Generic_Search', 'Brand_Search']
 const MAX_HEADLINE = 30
@@ -48,6 +60,19 @@ function guessProject(projects: { productive_id: string; name: string }[], clien
   })
   scored.sort((a, b) => b.score - a.score)
   return scored[0] && scored[0].score > 0 ? scored[0].id : ''
+}
+
+const fileSize = (n: number | null) => (n == null ? '' : n >= 1048576 ? `${(n / 1048576).toFixed(1).replace('.', ',')} MB` : `${Math.max(1, Math.round(n / 1024))} KB`)
+
+// Group attachments by where they were posted: the brief task first, then each subtask.
+function groupAttachments(list: Attachment[]): [string, Attachment[]][] {
+  const m = new Map<string, Attachment[]>()
+  for (const a of list) {
+    const key = a.from_subtask ? a.task_title ?? 'Podtask' : 'Brief task'
+    if (!m.has(key)) m.set(key, [])
+    m.get(key)!.push(a)
+  }
+  return [...m.entries()].sort(([a], [b]) => (a === 'Brief task' ? -1 : b === 'Brief task' ? 1 : a.localeCompare(b)))
 }
 
 const shortDate = (d: string | null) => (d ? `${Number(d.slice(8, 10))}.${Number(d.slice(5, 7))}.` : '')
@@ -106,6 +131,9 @@ export default function CampaignBuilder() {
   const [briefId, setBriefId] = useState('')
   const [briefLoading, setBriefLoading] = useState(false)
   const [drafting, setDrafting] = useState(false)
+  const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [attLoading, setAttLoading] = useState(false)
+  const [attError, setAttError] = useState('')
 
   useEffect(() => {
     supabase.from('clients').select('id, name, ga4_store').order('name').then(({ data }) => {
@@ -210,6 +238,25 @@ export default function CampaignBuilder() {
   }, [projectId])
 
   const brief = briefs.find((b) => b.task_id === briefId) ?? null
+
+  // Images, videos and files from the brief task and its subtasks; the first open copies them from Productive.
+  useEffect(() => {
+    setAttachments([])
+    setAttError('')
+    if (!briefId) return
+    let cancelled = false
+    setAttLoading(true)
+    supabase.functions.invoke('productive-briefs', { body: { action: 'attachments', task_id: briefId } }).then(({ data, error }) => {
+      if (cancelled) return
+      setAttLoading(false)
+      if (error || data?.error) {
+        setAttError(data?.error ?? error?.message ?? 'nepoznata greška')
+        return
+      }
+      setAttachments(data?.attachments ?? [])
+    })
+    return () => { cancelled = true }
+  }, [briefId])
 
   async function draftFromBrief() {
     if (!brief || !client) return
@@ -376,6 +423,50 @@ export default function CampaignBuilder() {
               <a href={brief.task_url} target="_blank" rel="noreferrer" className="text-[var(--color-indigo-dark)] underline">Otvori task u Productive-u</a>
             </div>
           </dl>
+        )}
+        {brief && (
+          <div className="mt-5 border-t border-[var(--color-line)] pt-4">
+            <p className="mb-1 text-sm font-medium">Kreative i prilozi{attachments.length ? ` · ${attachments.length}` : ''}</p>
+            <p className="mb-3 text-xs text-[var(--color-ink-soft)]">
+              Iz taska, podtaskova i komentara. Prvo otvaranje kopira fajlove iz Productive-a, pa može da potraje; linkovi važe sat vremena.
+            </p>
+            {attLoading && <p className="text-xs text-[var(--color-ink-soft)]">Preuzimam priloge iz Productive-a…</p>}
+            {attError && <p className="text-xs text-[var(--color-rust)]">Prilozi nisu učitani: {attError}</p>}
+            {!attLoading && !attError && attachments.length === 0 && <p className="text-xs text-[var(--color-ink-soft)]">Task nema priloga.</p>}
+            {groupAttachments(attachments).map(([group, list]) => (
+              <div key={group} className="mb-4">
+                <p className="mb-2 text-xs font-medium text-[var(--color-ink-soft)]">{group} · {list.length}</p>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+                  {list.map((a) => {
+                    const ct = a.content_type ?? ''
+                    return (
+                      <figure key={a.id} className="overflow-hidden rounded border border-[var(--color-line)] bg-slate-50">
+                        <div className="flex aspect-square items-center justify-center bg-slate-100">
+                          {a.url && ct.startsWith('image/') ? (
+                            <a href={a.url} target="_blank" rel="noreferrer" className="block h-full w-full">
+                              <img src={a.url} alt={a.name ?? ''} loading="lazy" className="h-full w-full object-contain" />
+                            </a>
+                          ) : a.url && ct.startsWith('video/') ? (
+                            <video src={a.url} controls preload="metadata" className="h-full w-full bg-black object-contain" />
+                          ) : (
+                            <span className="px-2 text-center text-xs uppercase text-[var(--color-ink-soft)]">{(a.name ?? '').split('.').pop() || 'fajl'}</span>
+                          )}
+                        </div>
+                        <figcaption className="px-2 py-1.5 text-[11px] leading-tight">
+                          <span className="block truncate" title={a.name ?? ''}>{a.name}</span>
+                          <span className="text-[var(--color-ink-soft)]">
+                            {fileSize(a.size_bytes)}
+                            {a.url && <> · <a href={a.url} target="_blank" rel="noreferrer" download={a.name ?? undefined} className="underline">preuzmi</a></>}
+                            {a.error && <span className="text-[var(--color-rust)]"> · {a.error}</span>}
+                          </span>
+                        </figcaption>
+                      </figure>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </section>
 
