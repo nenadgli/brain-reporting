@@ -1,0 +1,1 @@
+alter table meta_ad_set_metrics add column if not exists reach numeric default 0;
