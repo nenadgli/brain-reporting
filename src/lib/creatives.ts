@@ -38,11 +38,12 @@ export type ImageField = 'MARKETING_IMAGE' | 'SQUARE_MARKETING_IMAGE' | 'PORTRAI
 // Saved on drafts; `file` is the name inside the images/ folder of the Editor package.
 export type ImageAsset = { attachment_id: string; name: string; file: string; width: number; height: number; ratio: string; field?: ImageField }
 
-export type AssetMode = 'search' | 'pmax'
+// search: image assets of a Search ad group; pmax: asset group (logos too); dg: Demand Gen ad (square logo, no landscape logo).
+export type AssetMode = 'search' | 'pmax' | 'dg'
 
 type Shape = { ratio: string; value: number; minW: number; minH: number; field: ImageField }
 
-// Google Ads image specs. Search image assets take the three marketing shapes; PMax also takes logos.
+// Google Ads image specs. Search image assets take the three marketing shapes; PMax and Demand Gen also take logos.
 const MARKETING_SHAPES: Shape[] = [
   { ratio: '1.91:1', value: 1.91, minW: 600, minH: 314, field: 'MARKETING_IMAGE' },
   { ratio: '1:1', value: 1, minW: 300, minH: 300, field: 'SQUARE_MARKETING_IMAGE' },
@@ -65,8 +66,8 @@ export function checkImage(a: Attachment, w: number, h: number, mode: AssetMode)
   const shapes = mode === 'pmax' ? [...MARKETING_SHAPES, LANDSCAPE_LOGO] : MARKETING_SHAPES
   const shape = shapes.find((s) => Math.abs(w / h / s.value - 1) <= 0.02)
   if (!shape) return { problem: `${w}×${h} nije ${shapes.map((s) => s.ratio).join(', ')}` }
-  // A square file named like a logo is a logo in PMax (smaller minimum).
-  if (mode === 'pmax' && shape.field === 'SQUARE_MARKETING_IMAGE' && /logo/i.test(a.name ?? '')) {
+  // A square file named like a logo is a logo in PMax and Demand Gen (smaller minimum).
+  if (mode !== 'search' && shape.field === 'SQUARE_MARKETING_IMAGE' && /logo/i.test(a.name ?? '')) {
     if (w < LOGO_MIN) return { problem: `${w}×${h} je manje od ${LOGO_MIN}×${LOGO_MIN} za logo` }
     return { ratio: shape.ratio, field: 'LOGO' }
   }

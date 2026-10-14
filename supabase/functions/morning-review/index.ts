@@ -277,6 +277,8 @@ const short = (c: unknown) => {
 }
 const NET: Record<string, string> = { google: 'Google', meta: 'Meta' }
 // Serbian count agreement: 1 kampanja, 2-4 kampanje, 5+ kampanja (11-14 always kampanja).
+// Accusative after "za": 1 kampanju, 2-4 kampanje, 5+ kampanja.
+const kampanjuAcc = (n: number) => (n % 10 === 1 && n % 100 !== 11 ? 'kampanju' : kampanja(n))
 const kampanja = (n: number) => (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? 'kampanje' : 'kampanja')
 
 // Titles are built here, from the evidence, so the headline numbers are always right.
@@ -304,7 +306,7 @@ function titleFor(c: Candidate): string {
         ? `${e.disapproved} ${e.disapproved === 1 ? 'odbijen oglas' : 'odbijenih oglasa'}${e.limited ? ` i ${e.limited} sa ograničenim odobrenjem` : ''}`
         : `${e.limited} ${e.limited === 1 ? 'oglas ima' : 'oglasa imaju'} ograničeno odobrenje (Approved, limited)`
     case 'recommendations':
-      return `Optimization score naloga ${e.account_score_pct}% (cilj ${e.target_pct}%)${e.budget_recommendations?.length ? `, Google predlaže veći budžet za ${e.budget_recommendations.length} ${kampanja(e.budget_recommendations.length)}` : ''}`
+      return `${e.account_score_pct >= e.target_pct ? `Optimization score naloga je malo ispod cilja od ${e.target_pct}%` : `Optimization score naloga ${e.account_score_pct}% (cilj ${e.target_pct}%)`}${e.budget_recommendations?.length ? `, Google predlaže veći budžet za ${e.budget_recommendations.length} ${kampanjuAcc(e.budget_recommendations.length)}` : ''}`
     case 'ga4_tracking':
       return [
         (e.signals as string[]).includes('unknown_up') ? `GA4: saobraćaj bez izvora ${String(e.unknown_share_pct).replace('.', ',')}% sesija (uobičajeno ${String(e.unknown_share_base_pct).replace('.', ',')}%)` : '',

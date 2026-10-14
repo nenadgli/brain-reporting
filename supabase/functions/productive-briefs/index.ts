@@ -2,7 +2,7 @@ import { createClient } from 'jsr:@supabase/supabase-js@2'
 import Anthropic from 'npm:@anthropic-ai/sdk'
 
 // Productive "akcija" briefs (via Feed Hub) → Search campaign drafts in the Nove kampanje form.
-// Actions: projects | briefs | refresh | attachments | file_urls | draft | draft_pmax. Only agency users may call it.
+// Actions: projects | briefs | refresh | attachments | file_urls | draft | draft_pmax | draft_demand_gen. Only agency users may call it.
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -58,6 +58,18 @@ const PMAX_SCHEMA = {
     rationale: { type: 'string', description: 'kratko na srpskom: sta je uzeto iz briefa i sta treba proveriti' },
   },
   required: ['headlines', 'long_headlines', 'descriptions', 'search_themes', 'rationale'],
+  additionalProperties: false,
+}
+
+const DEMAND_GEN_SCHEMA = {
+  type: 'object',
+  properties: {
+    headlines: { type: 'array', items: { type: 'string' }, description: '5 naslova, svaki max 40 znakova' },
+    long_headlines: { type: 'array', items: { type: 'string' }, description: '3-5 dugih naslova za video oglas, svaki max 90 znakova' },
+    descriptions: { type: 'array', items: { type: 'string' }, description: '5 opisa, svaki max 90 znakova' },
+    rationale: { type: 'string', description: 'kratko na srpskom: sta je uzeto iz briefa i sta treba proveriti' },
+  },
+  required: ['headlines', 'long_headlines', 'descriptions', 'rationale'],
   additionalProperties: false,
 }
 
@@ -183,6 +195,30 @@ Deno.serve(async (req: Request) => {
         long_headlines: fit(out.long_headlines, 90, 5),
         descriptions: fit(out.descriptions, 90, 5),
         search_themes: fit(out.search_themes, 80, 25),
+        rationale: out.rationale, dropped_too_long: dropped, served_by: r.model,
+      })
+    }
+
+    // Text assets for a Demand Gen ad group (multi-image ad, plus a video ad when videos are given).
+    if (action === 'draft_demand_gen') {
+      const b = body.brief
+      if (!b?.headline && !b?.copy) return json({ error: 'Brief nema naziv ni copy' }, 400)
+      const prompt =
+        `Napravi tekstove za Demand Gen oglase (YouTube, Discover, Gmail) za akciju klijenta ${body.client_name ?? ''} (tržište ${body.market ?? ''}).\n\n` +
+        `BRIEF AKCIJE (jedini izvor činjenica):\n${JSON.stringify(briefFacts(b), null, 2)}\n\n` +
+        'Pravila:\n' + LANGUAGE_RULES +
+        '- Naslovi najviše 40 znakova, dugi naslovi najviše 90, opisi najviše 90; brojevi znakova moraju biti tačni.\n' +
+        '- Demand Gen se prikazuje ljudima koji ne traže aktivno: naslovi treba da zaustave skrolovanje (popust, rok, kolekcija), ne da ponavljaju ključne reči.\n' +
+        '- Naslovi i opisi treba da budu različiti međusobno i da svaki radi sam za sebe, jer ih Google kombinuje.'
+      const r = await structured(DEMAND_GEN_SCHEMA, 'Ti si PPC specijalista u agenciji. Pišeš tekstove za Demand Gen oglase isključivo na osnovu briefa koji dobiješ.', prompt)
+      if ('error' in r) return json({ error: r.error }, 502)
+      const out = r.out
+      const dropped: string[] = []
+      const fit = (list: string[], max: number, n: number) => uniq(list).filter((x) => (x.length <= max ? true : (dropped.push(x), false))).slice(0, n)
+      return json({
+        headlines: fit(out.headlines, 40, 5),
+        long_headlines: fit(out.long_headlines, 90, 5),
+        descriptions: fit(out.descriptions, 90, 5),
         rationale: out.rationale, dropped_too_long: dropped, served_by: r.model,
       })
     }

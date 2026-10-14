@@ -63,3 +63,6 @@ verify_jwt = true
 
 [functions.placements-sync]
 verify_jwt = true
+
+[functions.export-demand-gen-csv]
+verify_jwt = true

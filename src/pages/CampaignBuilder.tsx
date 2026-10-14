@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { type AssetMode, type Attachment, type Brief, type ImageAsset, FIELD_LABEL, assetFileName, checkImage, downloadEditorPackage, imageSize } from '../lib/creatives'
 import PmaxAssetGroupForm from './PmaxAssetGroupForm'
+import DemandGenAdGroupForm from './DemandGenAdGroupForm'
 
 type ClientRow = { id: string; name: string; ga4_store: string | null }
 type Draft = {
@@ -282,8 +283,8 @@ export default function CampaignBuilder() {
       setImages(images.filter((i) => i.attachment_id !== a.id))
       return
     }
-    if (images.length >= MAX_IMAGES + (mode === 'pmax' ? 5 : 0)) {
-      setImageNotes({ ...imageNotes, [a.id]: mode === 'pmax' ? `najviše ${MAX_IMAGES} slika i 5 logotipa` : `najviše ${MAX_IMAGES} slika po ad grupi` })
+    if (images.length >= MAX_IMAGES + (mode !== 'search' ? 5 : 0)) {
+      setImageNotes({ ...imageNotes, [a.id]: mode !== 'search' ? `najviše ${MAX_IMAGES} slika i 5 logotipa` : `najviše ${MAX_IMAGES} slika po ad grupi` })
       return
     }
     setImageNotes({ ...imageNotes, [a.id]: 'proveravam dimenzije…' })
@@ -294,7 +295,7 @@ export default function CampaignBuilder() {
         setImageNotes((n) => ({ ...n, [a.id]: res.problem }))
         return
       }
-      setImageNotes((n) => ({ ...n, [a.id]: `${w}×${h} · ${mode === 'pmax' ? FIELD_LABEL[res.field] : res.ratio}` }))
+      setImageNotes((n) => ({ ...n, [a.id]: `${w}×${h} · ${mode !== 'search' ? FIELD_LABEL[res.field] : res.ratio}` }))
       setImages((list) => [...list, { attachment_id: a.id, name: a.name ?? '', file: assetFileName(a), width: w, height: h, ratio: res.ratio, field: res.field }])
     } catch (e) {
       setImageNotes((n) => ({ ...n, [a.id]: (e as Error).message }))
@@ -308,7 +309,7 @@ export default function CampaignBuilder() {
     setMessage(null)
   }
 
-  // A square image picked for PMax can be either a marketing image or the logo.
+  // A square image picked for PMax or Demand Gen can be either a marketing image or the logo.
   function toggleLogo(id: string) {
     setImages((list) => list.map((i) => (i.attachment_id !== id || i.ratio !== '1:1' ? i : { ...i, field: i.field === 'LOGO' ? 'SQUARE_MARKETING_IMAGE' : 'LOGO' })))
   }
@@ -404,7 +405,7 @@ export default function CampaignBuilder() {
       </header>
 
       <div className="mb-6 inline-flex rounded border border-[var(--color-line)] bg-white p-0.5 text-sm">
-        {([['search', 'Search kampanja'], ['pmax', 'PMax asset grupa']] as const).map(([m, label]) => (
+        {([['search', 'Search kampanja'], ['pmax', 'PMax asset grupa'], ['dg', 'Demand Gen ad grupa']] as const).map(([m, label]) => (
           <button key={m} type="button" onClick={() => switchMode(m)}
             className={`rounded px-4 py-1.5 ${mode === m ? 'bg-[var(--color-indigo)] text-white' : 'text-[var(--color-ink-soft)]'}`}>
             {label}
@@ -492,8 +493,8 @@ export default function CampaignBuilder() {
             <p className="mb-1 text-sm font-medium">Kreative i prilozi{attachments.length ? ` · ${attachments.length}` : ''}</p>
             <p className="mb-3 text-xs text-[var(--color-ink-soft)]">
               Iz taska, podtaskova i komentara, čitaju se direktno iz Productive-a (ništa se ne kopira). Linkovi važe dva sata.
-              {mode === 'pmax'
-                ? <>Čekiraj „u asset grupu“ za slike i logotipe asset grupe ({images.length} izabrano); tip se prepoznaje po dimenzijama.</>
+              {mode !== 'search'
+                ? <>Čekiraj „{mode === 'pmax' ? 'u asset grupu' : 'u oglas'}“ za slike i logotipe ({images.length} izabrano); tip se prepoznaje po dimenzijama.</>
                 : <>Čekiraj „u Editor“ za slike koje idu kao image assets uz ad grupu ({images.length}/{MAX_IMAGES}); dimenzije se proveravaju odmah.</>}
             </p>
             {attLoading && <p className="text-xs text-[var(--color-ink-soft)]">Učitavam priloge iz Productive-a…</p>}
@@ -527,11 +528,11 @@ export default function CampaignBuilder() {
                           {isImage && (
                             <label className="mt-1 flex items-center gap-1">
                               <input type="checkbox" checked={picked} onChange={() => toggleImage(a)} />
-                              <span>{mode === 'pmax' ? 'u asset grupu' : 'u Editor'}</span>
+                              <span>{mode === 'pmax' ? 'u asset grupu' : mode === 'dg' ? 'u oglas' : 'u Editor'}</span>
                             </label>
                           )}
                           {imageNotes[a.id] && <span className={`block ${picked ? 'text-[var(--color-ink-soft)]' : 'text-[var(--color-rust)]'}`}>{imageNotes[a.id]}</span>}
-                          {picked && mode === 'pmax' && images.find((i) => i.attachment_id === a.id)?.ratio === '1:1' && (
+                          {picked && mode !== 'search' && images.find((i) => i.attachment_id === a.id)?.ratio === '1:1' && (
                             <label className="mt-0.5 flex items-center gap-1">
                               <input type="checkbox" checked={images.find((i) => i.attachment_id === a.id)?.field === 'LOGO'} onChange={() => toggleLogo(a.id)} />
                               <span>ovo je logo</span>
@@ -550,6 +551,17 @@ export default function CampaignBuilder() {
 
       {mode === 'pmax' && client && (
         <PmaxAssetGroupForm
+          client={client}
+          market={market}
+          brief={brief}
+          images={images}
+          onSaved={() => { setImages([]); setImageNotes({}) }}
+          onMessage={setMessage}
+        />
+      )}
+
+      {mode === 'dg' && client && (
+        <DemandGenAdGroupForm
           client={client}
           market={market}
           brief={brief}
