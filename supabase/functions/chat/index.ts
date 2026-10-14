@@ -5,11 +5,16 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY')!
 const MCP_ACCESS_TOKEN = Deno.env.get('MCP_ACCESS_TOKEN')!
 const MCP_URL = `${SUPABASE_URL}/functions/v1/mcp-server`
-const MODEL = 'claude-sonnet-5'
+const MODEL = 'claude-opus-5-5'
+const cors = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+}
+const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
 
-// This function requires a logged-in Supabase session (verify_jwt stays true,
-// unlike mcp-server which uses its own token) — only authenticated app users
-// can reach the chat, matching the rest of the dashboard.
+// The function checks the caller itself: only logged-in agency users (the tools see every client's
+// data). The Anthropic key is the project's ANTHROPIC_API_KEY secret, as for the other functions.
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 async function mcpCall(method: string, params?: Record<string, unknown>) {
@@ -41,11 +46,13 @@ async function callAnthropic(messages: AnthropicMessage[], tools: AnthropicTool[
     headers: {
       'x-api-key': ANTHROPIC_API_KEY,
       'anthropic-version': '2023-06-01',
+      'anthropic-beta': 'server-side-fallback-2026-07-01',
       'content-type': 'application/json',
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 2000,
+      fallbacks: 'default',
+      max_tokens: 4000,
       system:
         'Ti si analitičar za marketing agenciju koja koristi Brain Reporting Platform. ' +
         'Odgovaraj na srpskom, kratko i konkretno, sa brojevima iz alata koje pozivaš. ' +
@@ -63,17 +70,21 @@ async function callAnthropic(messages: AnthropicMessage[], tools: AnthropicTool[
 }
 
 Deno.serve(async (req: Request) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   try {
+    if (!ANTHROPIC_API_KEY) return json({ error: 'Nedostaje ANTHROPIC_API_KEY u Supabase secrets' }, 500)
     const authHeader = req.headers.get('Authorization') ?? ''
     const jwt = authHeader.replace('Bearer ', '')
     const { data: userData, error: userError } = await supabase.auth.getUser(jwt)
     if (userError || !userData?.user) {
-      return new Response(JSON.stringify({ error: 'Niste ulogovani' }), { status: 401, headers: { 'Content-Type': 'application/json' } })
+      return json({ error: 'Niste ulogovani' }, 401)
     }
+    const { data: au } = await supabase.from('app_users').select('agency_id, client_id').eq('id', userData.user.id).maybeSingle()
+    if (!au?.agency_id || au.client_id) return json({ error: 'AI Chat je dostupan samo korisnicima agencije' }, 403)
 
     const { message, history } = await req.json()
     if (!message) {
-      return new Response(JSON.stringify({ error: 'message je obavezan' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
+      return json({ error: 'message je obavezan' }, 400)
     }
 
     const tools = await getTools()
@@ -87,9 +98,7 @@ Deno.serve(async (req: Request) => {
       if (response.stop_reason !== 'tool_use') {
         const textBlocks = (response.content ?? []).filter((b: { type: string }) => b.type === 'text')
         const answer = textBlocks.map((b: { text: string }) => b.text).join('\n')
-        return new Response(JSON.stringify({ answer, history: [...messages, { role: 'assistant', content: response.content }] }), {
-          headers: { 'Content-Type': 'application/json' },
-        })
+        return json({ answer, history: [...messages, { role: 'assistant', content: response.content }] })
       }
 
       // Claude wants to call one or more tools — execute each via the MCP server, feed results back.
@@ -108,8 +117,9 @@ Deno.serve(async (req: Request) => {
       messages.push({ role: 'user', content: toolResults })
     }
 
-    return new Response(JSON.stringify({ error: 'Previše koraka, pokušaj preciznije pitanje.' }), { status: 500, headers: { 'Content-Type': 'application/json' } })
+    return json({ error: 'Previše koraka, pokušaj preciznije pitanje.' }, 500)
   } catch (err) {
-    return new Response(JSON.stringify({ error: (err as Error).message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
+    return json({ error: (err as Error).message }, 500)
   }
 })
+
