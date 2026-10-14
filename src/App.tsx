@@ -17,9 +17,11 @@ import CampaignBuilder from './pages/CampaignBuilder'
 import PlanProposal from './pages/PlanProposal'
 import MorningReview from './pages/MorningReview'
 import Budgets from './pages/Budgets'
+import TaskBoard from './pages/TaskBoard'
+import WorkLog from './pages/WorkLog'
 import './index.css'
 
-type View = 'summary' | 'client' | 'agency' | 'google_ads' | 'facebook_ads' | 'blended' | 'ga4' | 'owned' | 'chat' | 'ppc' | 'pacing' | 'campaigns' | 'proposal' | 'review' | 'budgets'
+type View = 'summary' | 'client' | 'agency' | 'google_ads' | 'facebook_ads' | 'blended' | 'ga4' | 'owned' | 'chat' | 'ppc' | 'pacing' | 'campaigns' | 'proposal' | 'review' | 'budgets' | 'tasks' | 'done'
 
 function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined)
@@ -45,10 +47,12 @@ function App() {
     { key: 'owned', label: 'Push & Newsletter' },
     { key: 'ppc', label: 'PPC Media Plan' },
     { key: 'pacing', label: 'Budget Pacing' },
+    { key: 'tasks', label: 'Taskovi' },
     { key: 'review', label: 'Jutarnji pregled' },
     { key: 'budgets', label: 'Budžeti' },
     { key: 'proposal', label: 'Predlog plana' },
     { key: 'campaigns', label: 'Nove kampanje' },
+    { key: 'done', label: 'Urađeno' },
   ]
 
   // Still checking for an existing session — avoid flashing the login screen.
@@ -101,6 +105,8 @@ function App() {
         {view === 'pacing' && <BudgetPacingReport />}
         {view === 'review' && <MorningReview />}
         {view === 'budgets' && <Budgets />}
+        {view === 'tasks' && <TaskBoard onOpen={setView} />}
+        {view === 'done' && <WorkLog />}
         {view === 'proposal' && <PlanProposal />}
         {view === 'campaigns' && <CampaignBuilder />}
       </div>

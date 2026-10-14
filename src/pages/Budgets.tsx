@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { downloadText } from '../lib/creatives'
+import { logAction } from '../lib/ppcTasks'
 
 // Replaces the "Budgets & Optimization" sheets and the monthly "Potrošnja - All clients" sheet:
 // the team types monthly budgets per campaign, Brain fills in spend and the daily budget that
@@ -159,6 +160,7 @@ export default function Budgets() {
     if (!list.length) { setMessage({ kind: 'err', text: 'Nema Google kampanja sa unetim mesečnim budžetom.' }); return }
     const lines = ['Campaign,Budget', ...list.map((r) => `${esc(r.campaign)},${Number(r.recommended_daily).toFixed(2)}`)]
     downloadText(`dnevni-budzeti_${slug(client?.name ?? 'klijent')}_${rows[0]?.data_date ?? month}.csv`, lines.join('\r\n') + '\r\n')
+    logAction(clientId, 'optimizacija_budzeta', 'editor_csv', `Google dnevni budžeti za ${list.length} kampanja`)
     setMessage({ kind: 'ok', text: `Preuzet CSV za ${list.length} kampanja${shared.length ? `; ${shared.length} sa deljenim budžetom (${shared.map((r) => r.campaign).join(', ')}) treba podesiti ručno` : ''}. U Editoru: Import → From file → proveri izmene budžeta → Post.` })
   }
   function exportMeta() {
@@ -166,11 +168,13 @@ export default function Budgets() {
     if (!list.length) { setMessage({ kind: 'err', text: 'Nema Meta kampanja sa unetim mesečnim budžetom.' }); return }
     const lines = ['Campaign,Monthly budget,Spent,Recommended daily budget', ...list.map((r) => [esc(r.campaign), r.monthly_budget, r.spent_mtd, Number(r.recommended_daily).toFixed(2)].join(','))]
     downloadText(`meta-budzeti_${slug(client?.name ?? 'klijent')}_${rows[0]?.data_date ?? month}.csv`, lines.join('\r\n') + '\r\n')
+    logAction(clientId, 'optimizacija_budzeta', 'meta_csv', `Meta dnevni budžeti za ${list.length} kampanja`)
   }
   function exportSpend() {
     const head = ['Klijent', 'Valuta', 'Google Regular', 'Google App', 'Meta Ecomm', 'Meta Social', 'Meta App', 'Ukupno', 'Projekcija do kraja meseca', 'Podaci zaključno sa']
     const lines = [head.join(','), ...spend.map((s) => [esc(s.client_name), s.currency, s.google_regular, s.google_app, s.meta_ecomm, s.meta_social, s.meta_app, s.total, s.projected_total, s.data_date].join(','))]
     downloadText(`potrosnja-svi-klijenti_${month.slice(0, 7)}.csv`, lines.join('\r\n') + '\r\n')
+    logAction(null, 'mesecna_potrosnja', 'izvestaj_csv', `Potrošnja svih klijenata za ${month.slice(0, 7)} (${spend.length} klijenata)`)
   }
 
   // A recommendation worth acting on: more than 10% away from today's daily budget.

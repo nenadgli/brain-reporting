@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { downloadText } from '../lib/creatives'
+import { logAction } from '../lib/ppcTasks'
 
 type Params = Record<string, unknown> & { currency?: string }
 type ClientOpt = { client_id: string; params: Params; clients: { name: string } | null }
@@ -441,6 +442,7 @@ export default function MorningReview() {
     const lines = ['Placement,Name,Type', ...approvedPlacements.map((r) => [esc(r.exclusion), esc(r.name), r.type].join(','))]
     const name = clients.find((c) => c.client_id === clientId)?.clients?.name ?? 'klijent'
     downloadText(`iskljuceni-plasmani_${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}_${run?.run_date ?? ''}.csv`, lines.join('\r\n') + '\r\n')
+    logAction(clientId, 'placements', 'iskljucenja_csv', `${approvedPlacements.length} plasmana za isključivanje`)
   }
 
   // Approved negative keywords as Editor rows: one exact negative per term per campaign it showed up in.
@@ -459,6 +461,7 @@ export default function MorningReview() {
     const lines = ['Campaign,Keyword,Criterion Type,Status', ...approvedNegatives.map((r) => [esc(r.campaign), esc(r.term), 'Campaign Negative Exact', 'Enabled'].join(','))]
     const name = clients.find((c) => c.client_id === clientId)?.clients?.name ?? 'klijent'
     downloadText(`negativne_${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}_${run?.run_date ?? ''}.csv`, lines.join('\r\n') + '\r\n')
+    logAction(clientId, 'search_terms', 'negativne_csv', `${approvedNegatives.length} negativnih ključnih reči`)
   }
 
   const client = clients.find((c) => c.client_id === clientId)
