@@ -28,8 +28,11 @@ and `internal_secrets` (`productive_file_signing_key`).
 
 Scheduling is done with pg_cron in the Brain database: `daily-windsor-sync` (04:00 UTC, fills `sync_queue`,
 including `account-settings-sync` for budgets, bidding targets and Meta spend caps),
+`weekly-placements-sync` (Monday 04:30 UTC, `placements-sync` for the last 30 days),
 `dispatch-sync-queue` (every minute, 15 jobs at a time) and `morning-review` (05:00 UTC, queues one
 review per client in `review_settings`; the dispatcher adds the internal key for those jobs).
+On Mondays the review also runs the weekly account check (`weekly_candidates`: disapproved ads,
+optimization score and recommendations, placements without conversions, GA4 traffic without a source).
 `daily-sync` is kept for manual runs only; called for all clients at once it hits Supabase's per-trace rate limit.
 
 ## Database migrations

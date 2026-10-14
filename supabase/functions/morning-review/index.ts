@@ -169,6 +169,19 @@ const OUTPUT_SCHEMA = {
         additionalProperties: false,
       },
     },
+    placements: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          placement: { type: 'string' },
+          action: { type: 'string', enum: ['iskljuci', 'zadrzi'] },
+          why: { type: 'string', description: 'jedna kratka recenica' },
+        },
+        required: ['placement', 'action', 'why'],
+        additionalProperties: false,
+      },
+    },
     findings: {
       type: 'array',
       items: {
@@ -185,7 +198,7 @@ const OUTPUT_SCHEMA = {
       },
     },
   },
-  required: ['terms', 'findings'],
+  required: ['terms', 'placements', 'findings'],
   additionalProperties: false,
 }
 
@@ -197,7 +210,7 @@ const SYSTEM =
   'Datume pisi kao 13.10., iznose kao u dokazu sa oznakom valute klijenta. Ne koristi engleske reci kao baseline; pisi "uobicajeno (prosek istog dana u nedelji)". ' +
   'Nista se ne menja u nalogu automatski; predlog je za coveka koji odobrava.'
 
-function buildPrompt(clientName: string, params: Record<string, unknown>, dataDate: string, stale: boolean, terms: Candidate[], others: Candidate[]) {
+function buildPrompt(clientName: string, params: Record<string, unknown>, dataDate: string, stale: boolean, terms: Candidate[], others: Candidate[], placements: Candidate[] = []) {
   return [
     `Klijent: ${clientName}. Valuta naloga: ${CUR}. Podaci zakljucno sa ${dataDate}.${stale ? ' UPOZORENJE: jutrosnji sync podataka nije uspeo, podaci mogu biti nepotpuni.' : ''}`,
     `Pravila klijenta: konkurenti ${JSON.stringify(params.competitors)}; brendovi koje klijent prodaje ${JSON.stringify(params.brands_sold)}.`,
@@ -208,6 +221,11 @@ function buildPrompt(clientName: string, params: Record<string, unknown>, dataDa
     '- Ako nisi siguran da li klijent prodaje brend, stavi relevantno i zadrzi, i to reci u why.',
     JSON.stringify(terms.map((t) => t.evidence)),
     '',
+    'ZADATAK 3, plasmani (Display, Demand Gen, YouTube) koji su trosili 30 dana bez konverzije. Za svaki odredi action:',
+    '- iskljuci: igrice, aplikacije i kanali za decu, alati (VPN, baterija, skeneri, kalkulatori), sadrzaj bez veze sa ponudom klijenta, sumnjivi sajtovi sa neuobicajeno visokim CTR-om (slucajni klikovi).',
+    '- zadrzi: relevantni sajtovi i kanali (moda, lifestyle, vesti, publika klijenta) ili kada nisi siguran; to reci u why.',
+    placements.length ? JSON.stringify(placements.map((p) => p.evidence)) : '[] (nema plasmana ove nedelje)',
+    '',
     'ZADATAK 2, ostali nalazi. Naslov vec postoji (title); za svaki napisi detail i proposal i proceni severity.',
     '- Pacing: poredi sa planom po flightovima (plan_to_date), ne linearno; linear_to_date pomeni samo ako pomaze. Predlog koristi daily_adjustment (iznos dnevno za always-on kampanje) i napomenu o predstojecim flightovima (upcoming_flights).',
     '- spend_stopped: vise kampanja je palo na 0. Za svaku stavku pogledaj last_spend_date, days_without_spend, planned_flights_that_day i flights_ended_last_3_days: ako se flight upravo zavrsio, gasenje je verovatno planirano; ako planirani flight jos traje, a kampanja ne trosi vise od jednog dana, to je problem. Reci za koje kampanje je sta. keep=false samo ako su sve planirane.',
@@ -215,6 +233,9 @@ function buildPrompt(clientName: string, params: Record<string, unknown>, dataDa
     '- Tracking i pad konverzija: proveri da li to moze biti kasnjenje podataka za poslednji dan; predlozi proveru u nalogu pre bilo kakve izmene.',
     '- meta_cap: Meta nalog ima limit potrošnje (spend_cap); kad se dostigne, sve kampanje na nalogu staju. Predlog: povećati limit u Billing podešavanjima ili javiti klijentu.',
     '- campaign_budgets: kampanje odstupaju od mesečnog budžeta koji je tim uneo; predlog koristi recommended_daily (dnevni budžet da se ostatak potroši ravnomerno).',
+    '- ads_policy: oglasi sa statusom DISAPPROVED ili APPROVED_LIMITED (topics je razlog). Predlog: u aktivnoj kampanji ispraviti oglas i poslati na review, u staroj kampanji ukloniti oglas; redovno da se izbegne suspenzija naloga.',
+    '- recommendations: optimization score naloga i preporuke Google-a. Ne preporucuj slepo prihvatanje: preporuke za broad match i display expansion uglavnom odbaciti, budzetske razmotriti samo ako kampanja gubi prikazivanja zbog budzeta.',
+    '- ga4_tracking: u GA4 je porastao udeo saobracaja bez izvora (direct/unassigned) ili je pao broj placenih sesija po kliku; verovatno UTM, gclid ili consent problem. Predlog: proveriti sa tracking timom.',
     '- Kalendar akcija: brief_prep = akcija pocinje uskoro, a u Brain-u nema nacrta; brief_ended = akcija je zavrsena, a asset grupa jos trosi.',
     '- keep=false samo kad je ocigledno da nalaz nije problem.',
     JSON.stringify(others.map((o) => ({ fingerprint: o.fingerprint, check_type: o.check_type, severity: o.severity, title: titleFor(o), evidence: o.evidence }))),
@@ -278,6 +299,18 @@ function titleFor(c: Candidate): string {
       return `Meta limit potrošnje „${e.account}“: iskorišćeno ${e.used_pct}% (${eur(e.amount_spent)} od ${eur(e.spend_cap)})${e.days_left != null ? `, dovoljno za još oko ${e.days_left} dana` : ''}`
     case 'campaign_budgets':
       return `${e.items.length} ${kampanja(e.items.length)} odstupa od mesečnog budžeta: ${e.items.slice(0, 3).map((i: { campaign: string }) => short(i.campaign)).join(', ')}${e.items.length > 3 ? ' i druge' : ''}`
+    case 'ads_policy':
+      return e.disapproved > 0
+        ? `${e.disapproved} ${e.disapproved === 1 ? 'odbijen oglas' : 'odbijenih oglasa'}${e.limited ? ` i ${e.limited} sa ograničenim odobrenjem` : ''}`
+        : `${e.limited} ${e.limited === 1 ? 'oglas ima' : 'oglasa imaju'} ograničeno odobrenje (Approved, limited)`
+    case 'recommendations':
+      return `Optimization score naloga ${e.account_score_pct}% (cilj ${e.target_pct}%)${e.budget_recommendations?.length ? `, Google predlaže veći budžet za ${e.budget_recommendations.length} ${kampanja(e.budget_recommendations.length)}` : ''}`
+    case 'ga4_tracking':
+      return [
+        (e.signals as string[]).includes('unknown_up') ? `GA4: saobraćaj bez izvora ${String(e.unknown_share_pct).replace('.', ',')}% sesija (uobičajeno ${String(e.unknown_share_base_pct).replace('.', ',')}%)` : '',
+        (e.signals as string[]).includes('google_paid_gap') ? `google/cpc sesija po kliku ${String(e.google_sessions_per_click).replace('.', ',')} (uobičajeno ${String(e.google_sessions_per_click_base).replace('.', ',')})` : '',
+        (e.signals as string[]).includes('meta_paid_gap') ? `Meta paid sesija po kliku ${String(e.meta_sessions_per_click).replace('.', ',')} (uobičajeno ${String(e.meta_sessions_per_click_base).replace('.', ',')})` : '',
+      ].filter(Boolean).join('; ')
     case 'brief_prep':
       return `Akcija „${e.action}“ počinje ${dm(e.start_date)}, a u Brain-u nema pripremljene asset grupe`
     case 'brief_ended':
@@ -302,6 +335,12 @@ function fallbackFor(c: Candidate): { detail: string; proposal: string } {
       return { detail: `Preostalo ${eur(e.remaining)} uz prosečnu potrošnju od ${eur(e.avg_daily_spend)} dnevno.`, proposal: 'Povećati limit potrošnje naloga u Meta Billing podešavanjima ili dogovoriti sa klijentom.' }
     case 'campaign_budgets':
       return { detail: e.items.map((i: Record<string, unknown>) => `${short(i.campaign)}: projekcija ${eur(i.projected_month)} za budžet ${eur(i.monthly_budget)}`).join('; ') + '.', proposal: 'Podesiti dnevne budžete prema predlogu na stranici Budžeti (Editor CSV).' }
+    case 'ads_policy':
+      return { detail: 'Lista oglasa i razloga je ispod.', proposal: 'U aktivnim kampanjama ispraviti oglase i poslati na review; u starim kampanjama ukloniti odbijene oglase.' }
+    case 'recommendations':
+      return { detail: 'Preporuke po kampanjama su ispod.', proposal: 'Proći preporuke u Google Ads-u: prihvatiti korisne, odbaciti broad match i display expansion.' }
+    case 'ga4_tracking':
+      return { detail: 'Poređenje poslednjih 7 dana sa prethodne 4 nedelje.', proposal: 'Proveriti UTM parametre, auto-tagging (gclid) i consent podešavanja sa tracking timom.' }
     case 'pacing':
       return { detail: `Plan za mesec je ${eur(e.plan_month)}; ostalo je ${e.remaining_days} dana.`, proposal: `Dnevni budžet always-on kampanja pomeriti za ${eur(e.daily_adjustment)}.` }
     default:
@@ -358,6 +397,40 @@ function termCount(n: number, action: string): string {
   return `${n} ${many} termina je potrošilo`
 }
 
+// Placements to exclude are one finding (one approval = one exclusion list); the rest is info.
+function placementFindings(pls: Candidate[], classes: { placement: string; action: string; why: string }[]): Finding[] {
+  const by = new Map(classes.map((c) => [c.placement, c]))
+  const groups: Record<string, { items: Record<string, unknown>[]; spend: number }> = {}
+  for (const p of pls) {
+    const e = p.evidence as Record<string, unknown>
+    const c = by.get(String(e.placement)) ?? { action: 'zadrzi', why: 'nije klasifikovano' }
+    const g = (groups[c.action] ??= { items: [], spend: 0 })
+    g.items.push({ ...e, action: c.action, why: c.why })
+    g.spend += Number(e.spend) || 0
+  }
+  const out: Finding[] = []
+  for (const [action, g] of Object.entries(groups)) {
+    g.items.sort((a, b) => Number(b.spend) - Number(a.spend))
+    const n = g.items.length
+    const top = g.items.slice(0, 3).map((i) => `${i.name ?? i.placement} (${fmt1(i.spend)} ${CUR})`).join(', ')
+    out.push({
+      check_type: 'placements',
+      fingerprint: `pl_group:${action}:${String(g.items[0].snapshot_date ?? '')}`,
+      severity: action === 'iskljuci' ? 'srednje' : 'info',
+      impact_eur: Math.round(g.spend),
+      title: action === 'iskljuci'
+        ? `${n} ${n % 10 === 1 && n % 100 !== 11 ? 'plasman za isključivanje je potrošio' : 'plasmana za isključivanje potrošilo je'} ${fmt(g.spend)} ${CUR} za 30 dana bez konverzije`
+        : `${n} ${n % 10 === 1 && n % 100 !== 11 ? 'plasman bez konverzije ostaje' : 'plasmana bez konverzije ostaje'} (${fmt(g.spend)} ${CUR}), relevantni su`,
+      detail: `Najveći: ${top}.`,
+      proposal: action === 'iskljuci'
+        ? 'Dodati ih kao isključene plasmane (na nivou naloga ili kampanja u kojima su se pojavili); lista se preuzima kao CSV posle odobrenja.'
+        : 'Ne isključivati; pratiti još nedelju dana.',
+      evidence: { action, period: g.items[0].period, items: g.items },
+    })
+  }
+  return out
+}
+
 // Search terms are grouped per proposed action, so one approval covers one negative list.
 function termFindings(terms: Candidate[], classes: { term: string; kind: string; action: string; why: string }[]): Finding[] {
   const byTerm = new Map(classes.map((c) => [c.term.toLowerCase(), c]))
@@ -394,8 +467,12 @@ function termFindings(terms: Candidate[], classes: { term: string; kind: string;
   return out
 }
 
-async function reviewClient(clientId: string, clientName: string, params: Record<string, unknown>) {
+// Checks that run once a week; their findings stay open all week.
+const WEEKLY_TYPES = ['ads_policy', 'recommendations', 'placements', 'ga4_tracking']
+
+async function reviewClient(clientId: string, clientName: string, params: Record<string, unknown>, forceWeekly = false) {
   const runDate = today()
+  const weekly = forceWeekly || new Date(runDate + 'T00:00:00Z').getUTCDay() === Number(params.weekly_weekday ?? 1)
   CUR = String(params.currency ?? 'EUR')
   const { data: run, error: runErr } = await sb.from('review_runs')
     .upsert({ client_id: clientId, run_date: runDate, status: 'running', started_at: new Date().toISOString(), error: null }, { onConflict: 'client_id,run_date' })
@@ -403,10 +480,16 @@ async function reviewClient(clientId: string, clientName: string, params: Record
   if (runErr) throw runErr
 
   try {
-    // Yesterday's open findings are superseded by today's run.
-    await sb.from('review_findings').update({ status: 'isteklo' }).eq('client_id', clientId).eq('status', 'novo').lt('run_date', runDate)
-    // A rerun today replaces today's undecided findings.
-    await sb.from('review_findings').delete().eq('run_id', run.id).eq('status', 'novo')
+    // Yesterday's open daily findings are superseded by today's run; weekly ones by next week's.
+    const typeList = `(${WEEKLY_TYPES.join(',')})`
+    await sb.from('review_findings').update({ status: 'isteklo' }).eq('client_id', clientId).eq('status', 'novo')
+      .lt('run_date', runDate).not('check_type', 'in', typeList)
+    await sb.from('review_findings').update({ status: 'isteklo' }).eq('client_id', clientId).eq('status', 'novo')
+      .lt('run_date', addDays(runDate, -6)).in('check_type', WEEKLY_TYPES)
+    // A rerun today replaces today's undecided findings (the weekly ones only when the weekly check reruns).
+    let clear = sb.from('review_findings').delete().eq('run_id', run.id).eq('status', 'novo')
+    if (!weekly) clear = clear.not('check_type', 'in', typeList)
+    await clear
 
     const { data: cands, error } = await sb.rpc('review_candidates', { p_client_id: clientId })
     if (error) throw error
@@ -442,6 +525,11 @@ async function reviewClient(clientId: string, clientName: string, params: Record
       return true
     })
     candidates.push(...await budgetCandidates(clientId))
+    if (weekly) {
+      const { data: wc, error: we } = await sb.rpc('weekly_candidates', { p_client_id: clientId })
+      if (we) throw we
+      candidates.push(...((wc ?? []) as Candidate[]))
+    }
     if (params.productive_project_id) {
       candidates.push(...await calendarCandidates(clientId, String(params.productive_project_id), Number(params.brief_lead_days ?? 3), runDate))
     }
@@ -456,7 +544,11 @@ async function reviewClient(clientId: string, clientName: string, params: Record
     for (const d of decided ?? []) {
       if (d.check_type === 'spend_stopped') for (const i of ((d.evidence as { items?: { fingerprint: string }[] }).items ?? [])) decidedFp.add(i.fingerprint)
     }
-    candidates = candidates.filter((c) => c.check_type === 'search_term' ? !decidedTerms.has(String(c.evidence.term)) : !decidedFp.has(c.fingerprint))
+    const decidedPlacements = new Set((decided ?? []).filter((d) => d.check_type === 'placements')
+      .flatMap((d) => ((d.evidence as { items?: { placement: string }[] }).items ?? []).map((i) => i.placement)))
+    candidates = candidates.filter((c) => c.check_type === 'search_term' ? !decidedTerms.has(String(c.evidence.term))
+      : c.check_type === 'placement' ? !decidedPlacements.has(String(c.evidence.placement))
+      : !decidedFp.has(c.fingerprint))
     candidates = groupStopped(candidates)
     for (const c of candidates) {
       if (c.check_type === 'pacing') c.evidence.daily_adjustment = Math.round(-Number(c.evidence.gap) / Math.max(1, Number(c.evidence.remaining_days)))
@@ -465,7 +557,9 @@ async function reviewClient(clientId: string, clientName: string, params: Record
     // Big accounts can have hundreds of wasted terms; the biggest 80 keep one call fast and readable.
     const terms = candidates.filter((c) => c.check_type === 'search_term')
       .sort((a, b) => Number(b.evidence.spend) - Number(a.evidence.spend)).slice(0, 80)
-    const others = candidates.filter((c) => c.check_type !== 'search_term')
+    const placements = candidates.filter((c) => c.check_type === 'placement')
+      .sort((a, b) => Number(b.evidence.spend) - Number(a.evidence.spend)).slice(0, 80)
+    const others = candidates.filter((c) => c.check_type !== 'search_term' && c.check_type !== 'placement')
     let findings: Finding[] = []
     let model = ''
     if (stale) {
@@ -477,8 +571,8 @@ async function reviewClient(clientId: string, clientName: string, params: Record
         evidence: { last_load: lastLoad ?? null },
       })
     }
-    if (terms.length || others.length) {
-      const { out, model: m } = await askClaude(buildPrompt(clientName, params, dataDate, stale, terms, others))
+    if (terms.length || others.length || placements.length) {
+      const { out, model: m } = await askClaude(buildPrompt(clientName, params, dataDate, stale, terms, others, placements))
       model = m
       const worded = new Map((out.findings ?? []).map((f: Record<string, unknown>) => [f.fingerprint, f]))
       for (const c of others) {
@@ -498,10 +592,13 @@ async function reviewClient(clientId: string, clientName: string, params: Record
         })
       }
       if (terms.length) findings.push(...termFindings(terms, out.terms ?? []))
+      if (placements.length) findings.push(...placementFindings(placements, out.placements ?? []))
     }
 
     findings.sort((a, b) => (SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]) || ((b.impact_eur ?? 0) - (a.impact_eur ?? 0)))
-    findings = findings.slice(0, Number(params.max_findings ?? 7))
+    // The daily cap keeps the morning list short; the weekly checks come on top, once a week.
+    const daily = findings.filter((f) => !WEEKLY_TYPES.includes(f.check_type)).slice(0, Number(params.max_findings ?? 7))
+    findings = [...daily, ...findings.filter((f) => WEEKLY_TYPES.includes(f.check_type))]
 
     if (findings.length) {
       const { error: insErr } = await sb.from('review_findings').insert(findings.map((f, i) => ({
@@ -515,7 +612,7 @@ async function reviewClient(clientId: string, clientName: string, params: Record
       status: 'done', finished_at: new Date().toISOString(), data_date: dataDate || null,
       candidates: candidates.length, findings: findings.length, model: model || null,
     }).eq('id', run.id)
-    return { client: clientName, candidates: candidates.length, findings: findings.length, stale }
+    return { client: clientName, candidates: candidates.length, findings: findings.length, stale, weekly }
   } catch (e) {
     await sb.from('review_runs').update({ status: 'failed', error: (e as Error).message, finished_at: new Date().toISOString() }).eq('id', run.id)
     throw e
@@ -544,7 +641,7 @@ Deno.serve(async (req: Request) => {
     const results = []
     for (const s of settings ?? []) {
       try {
-        results.push(await reviewClient(s.client_id, (s.clients as unknown as { name: string })?.name ?? '', s.params as Record<string, unknown>))
+        results.push(await reviewClient(s.client_id, (s.clients as unknown as { name: string })?.name ?? '', s.params as Record<string, unknown>, body.weekly === true))
       } catch (e) {
         results.push({ client_id: s.client_id, error: (e as Error).message })
       }

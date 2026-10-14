@@ -60,3 +60,6 @@ verify_jwt = true
 
 [functions.account-settings-sync]
 verify_jwt = true
+
+[functions.placements-sync]
+verify_jwt = true

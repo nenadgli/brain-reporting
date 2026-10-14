@@ -50,6 +50,10 @@ const CHECK_LABEL: Record<string, string> = {
   brief_ended: 'Akcija završena',
   data: 'Podaci',
   meta_cap: 'Meta limit naloga',
+  ads_policy: 'Nedeljno · odbijeni oglasi',
+  recommendations: 'Nedeljno · preporuke',
+  placements: 'Nedeljno · plasmani',
+  ga4_tracking: 'Nedeljno · GA4 izvori',
   campaign_budgets: 'Mesečni budžeti',
 }
 const STATUS_LABEL: Record<Status, string> = {
@@ -102,6 +106,92 @@ function Evidence({ f, cur }: { f: Finding; cur: string }) {
             </tr>
           ))}
         </tbody>
+      </table>
+    )
+  }
+  if (f.check_type === 'ads_policy') {
+    const items = (e.items as Record<string, string | null>[]) ?? []
+    const topics = (t: string | null) => { try { return (JSON.parse(t ?? '[]') as { topic: string }[]).map((x) => x.topic.toLowerCase().replace(/_/g, ' ')).join(', ') } catch { return t ?? '' } }
+    return (
+      <table className="mt-2 w-full text-xs">
+        <thead className="text-left text-[var(--color-ink-soft)]">
+          <tr><th className="py-1 pr-3">Kampanja / ad grupa</th><th className="pr-3">Oglas</th><th className="pr-3">Status</th><th>Razlog</th></tr>
+        </thead>
+        <tbody>
+          {items.map((i) => (
+            <tr key={String(i.ad_id)} className="border-t border-[var(--color-line)]">
+              <td className="py-1 pr-3">{i.campaign}{i.ad_group ? ` · ${i.ad_group}` : ''}{i.campaign_status !== 'ENABLED' ? <span className="text-[var(--color-ink-soft)]"> (kampanja nije aktivna)</span> : null}</td>
+              <td className="pr-3">{i.ad_id}</td>
+              <td className="pr-3">{i.approval === 'DISAPPROVED' ? 'odbijen' : 'ograničeno'}</td>
+              <td>{topics(i.topics)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )
+  }
+  if (f.check_type === 'recommendations') {
+    const camps = (e.campaigns as { campaign: string; score_pct: number; types: string[] }[]) ?? []
+    const budgets = (e.budget_recommendations as { campaign: string; daily_budget: number | null; recommended_budget: number; lost_is_budget_pct: number | null }[]) ?? []
+    return (
+      <div className="mt-2 space-y-3 text-xs">
+        {budgets.length > 0 && (
+          <table className="w-full">
+            <thead className="text-left text-[var(--color-ink-soft)]"><tr><th className="py-1 pr-3">Kampanja</th><th className="pr-3 text-right">Dnevni sada</th><th className="pr-3 text-right">Google predlaže</th><th className="text-right">Izgubljeno zbog budžeta</th></tr></thead>
+            <tbody>{budgets.map((b) => (
+              <tr key={b.campaign} className="border-t border-[var(--color-line)]">
+                <td className="py-1 pr-3">{b.campaign}</td><td className="pr-3 text-right">{b.daily_budget ?? '—'}</td>
+                <td className="pr-3 text-right">{b.recommended_budget}</td><td className="text-right">{b.lost_is_budget_pct == null ? '—' : `${b.lost_is_budget_pct}%`}</td>
+              </tr>))}</tbody>
+          </table>
+        )}
+        {camps.length > 0 && (
+          <table className="w-full">
+            <thead className="text-left text-[var(--color-ink-soft)]"><tr><th className="py-1 pr-3">Kampanja</th><th className="pr-3 text-right">Score</th><th>Preporuke</th></tr></thead>
+            <tbody>{camps.map((c) => (
+              <tr key={c.campaign} className="border-t border-[var(--color-line)]">
+                <td className="py-1 pr-3">{c.campaign}</td><td className="pr-3 text-right">{c.score_pct}%</td>
+                <td>{c.types.map((t) => t.toLowerCase().replace(/_/g, ' ')).join(', ')}</td>
+              </tr>))}</tbody>
+          </table>
+        )}
+      </div>
+    )
+  }
+  if (f.check_type === 'placements') {
+    const items = (e.items as Record<string, unknown>[]) ?? []
+    return (
+      <table className="mt-2 w-full text-xs">
+        <thead className="text-left text-[var(--color-ink-soft)]">
+          <tr><th className="py-1 pr-3">Plasman</th><th className="pr-3">Tip</th><th className="pr-3 text-right">Trošak ({cur})</th><th className="pr-3 text-right">Klikovi</th><th className="pr-3 text-right">CTR</th><th>Zašto</th></tr>
+        </thead>
+        <tbody>
+          {items.map((i) => (
+            <tr key={String(i.placement)} className="border-t border-[var(--color-line)]">
+              <td className="py-1 pr-3">{String(i.name ?? i.placement)}</td>
+              <td className="pr-3">{String(i.type ?? '').toLowerCase().replace(/_/g, ' ')}</td>
+              <td className="pr-3 text-right">{Number(i.spend).toLocaleString('sr-RS', { maximumFractionDigits: 2 })}</td>
+              <td className="pr-3 text-right">{String(i.clicks)}</td>
+              <td className="pr-3 text-right">{i.ctr_pct == null ? '—' : `${String(i.ctr_pct).replace('.', ',')}%`}</td>
+              <td>{String(i.why ?? '')}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )
+  }
+  if (f.check_type === 'ga4_tracking') {
+    const rows: [string, unknown, unknown][] = [
+      ['Udeo sesija bez izvora (direct / not set)', `${e.unknown_share_pct}%`, `${e.unknown_share_base_pct}%`],
+      ['google / cpc sesija po Google Ads kliku', e.google_sessions_per_click, e.google_sessions_per_click_base],
+      ['Meta paid sesija po Meta kliku', e.meta_sessions_per_click, e.meta_sessions_per_click_base],
+    ]
+    return (
+      <table className="mt-2 w-full text-xs">
+        <thead className="text-left text-[var(--color-ink-soft)]"><tr><th className="py-1 pr-3">Pokazatelj</th><th className="pr-3 text-right">Poslednjih 7 dana</th><th className="text-right">Prethodne 4 nedelje</th></tr></thead>
+        <tbody>{rows.map(([k, a, b]) => (
+          <tr key={k} className="border-t border-[var(--color-line)]"><td className="py-1 pr-3">{k}</td><td className="pr-3 text-right">{a == null ? '—' : String(a)}</td><td className="text-right">{b == null ? '—' : String(b)}</td></tr>
+        ))}</tbody>
       </table>
     )
   }
@@ -285,10 +375,19 @@ export default function MorningReview() {
 
   async function loadFindings() {
     if (!runId) { setFindings([]); return }
-    const { data } = await supabase.from('review_findings')
-      .select('id, check_type, severity, impact_eur, title, detail, proposal, evidence, rank, status, decision_reason, decided_at')
-      .eq('run_id', runId).order('rank')
-    setFindings((data ?? []) as Finding[])
+    const cols = 'id, check_type, severity, impact_eur, title, detail, proposal, evidence, rank, status, decision_reason, decided_at'
+    const { data } = await supabase.from('review_findings').select(cols).eq('run_id', runId).order('rank')
+    // Weekly checks run on Mondays; their findings stay on the list for the rest of the week.
+    const day = runs.find((r) => r.id === runId)?.run_date
+    let weekly: Finding[] = []
+    if (day) {
+      const from = new Date(Date.parse(day) - 6 * 864e5).toISOString().slice(0, 10)
+      const { data: w } = await supabase.from('review_findings').select(cols).eq('client_id', clientId)
+        .in('check_type', ['ads_policy', 'recommendations', 'placements', 'ga4_tracking'])
+        .gte('run_date', from).lt('run_date', day).order('rank')
+      weekly = (w ?? []) as Finding[]
+    }
+    setFindings([...((data ?? []) as Finding[]), ...weekly])
   }
   useEffect(() => { loadFindings() }, [runId])
 
@@ -302,9 +401,9 @@ export default function MorningReview() {
     loadFindings()
   }
 
-  async function rerun() {
+  async function rerun(weekly = false) {
     setRerunning(true); setMessage(null)
-    const { data, error } = await supabase.functions.invoke('morning-review', { body: { client_id: clientId } })
+    const { data, error } = await supabase.functions.invoke('morning-review', { body: { client_id: clientId, weekly } })
     setRerunning(false)
     const r = data?.results?.[0]
     if (error || data?.error || r?.error) {
@@ -320,6 +419,27 @@ export default function MorningReview() {
     const { error } = await supabase.from('review_runs').update({ team_notes: notes }).eq('id', run.id)
     setMessage(error ? { kind: 'err', text: 'Beleška nije sačuvana.' } : { kind: 'ok', text: 'Beleška za probnu nedelju je sačuvana.' })
     loadRuns(false)
+  }
+
+  // Approved placement exclusions, written the way the Google Ads exclusion list accepts them.
+  const approvedPlacements = useMemo(() => {
+    const rows: { campaign: string; exclusion: string; name: string; type: string }[] = []
+    for (const f of findings) {
+      if (f.check_type !== 'placements' || f.status !== 'odobreno' || f.evidence.action !== 'iskljuci') continue
+      for (const i of (f.evidence.items as Record<string, unknown>[]) ?? []) {
+        const p = String(i.placement), t = String(i.type ?? '')
+        const exclusion = t === 'MOBILE_APPLICATION' ? `mobileapp::${p}` : t === 'YOUTUBE_CHANNEL' ? `youtube.com/channel/${p}` : t === 'YOUTUBE_VIDEO' ? `youtube.com/video/${p}` : p
+        for (const c of (i.campaigns as string[]) ?? []) rows.push({ campaign: c, exclusion, name: String(i.name ?? ''), type: t })
+      }
+    }
+    return rows
+  }, [findings])
+
+  function exportPlacements() {
+    const esc = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s)
+    const lines = ['Campaign,Placement,Name,Type', ...approvedPlacements.map((r) => [esc(r.campaign), esc(r.exclusion), esc(r.name), r.type].join(','))]
+    const name = clients.find((c) => c.client_id === clientId)?.clients?.name ?? 'klijent'
+    downloadText(`iskljuceni-plasmani_${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}_${run?.run_date ?? ''}.csv`, lines.join('\r\n') + '\r\n')
   }
 
   // Approved negative keywords as Editor rows: one exact negative per term per campaign it showed up in.
@@ -369,7 +489,11 @@ export default function MorningReview() {
               {runs.map((r) => <option key={r.id} value={r.id}>{shortDate(r.run_date)}{r.status === 'failed' ? ' (greška)' : ''}</option>)}
             </select>
           </label>
-          <button onClick={rerun} disabled={rerunning || !clientId}
+          <button onClick={() => rerun(true)} disabled={rerunning || !clientId} title="Odbijeni oglasi, preporuke, plasmani i GA4 izvori; inače se radi ponedeljkom"
+            className="rounded border border-[var(--color-line)] bg-white px-4 py-1.5 disabled:opacity-40">
+            Nedeljni pregled
+          </button>
+          <button onClick={() => rerun()} disabled={rerunning || !clientId}
             className="rounded border border-[var(--color-indigo)] px-4 py-1.5 font-medium text-[var(--color-indigo-dark)] disabled:opacity-40">
             {rerunning ? 'Pregledam…' : 'Pokreni ponovo'}
           </button>
@@ -476,6 +600,14 @@ export default function MorningReview() {
               <p className="text-sm font-medium">Odobrene negativne ključne reči · {approvedNegatives.length} redova</p>
               <p className="mt-1 text-xs text-[var(--color-ink-soft)]">Exact negativne na nivou kampanja u kojima se termin pojavio. U Editoru: Import → From file → proveri izmene → Post.</p>
               <button onClick={exportNegatives} className="mt-3 rounded border border-[var(--color-indigo)] px-4 py-1.5 text-sm font-medium text-[var(--color-indigo-dark)]">Izvezi CSV za Editor</button>
+            </section>
+          )}
+
+          {approvedPlacements.length > 0 && (
+            <section className="mb-10 rounded border border-[var(--color-line)] bg-white p-5">
+              <p className="text-sm font-medium">Odobreni plasmani za isključivanje · {approvedPlacements.length} redova</p>
+              <p className="mt-1 text-xs text-[var(--color-ink-soft)]">Kolona Placement je u obliku koji prima Google Ads lista isključenih plasmana (sajt, mobileapp::…, youtube.com/channel/…). Kolona Campaign kaže gde se plasman pojavio.</p>
+              <button onClick={exportPlacements} className="mt-3 rounded border border-[var(--color-indigo)] px-4 py-1.5 text-sm font-medium text-[var(--color-indigo-dark)]">Izvezi CSV</button>
             </section>
           )}
 
