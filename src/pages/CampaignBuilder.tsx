@@ -96,6 +96,7 @@ export default function CampaignBuilder() {
   const [briefs, setBriefs] = useState<Brief[]>([])
   const [briefId, setBriefId] = useState('')
   const [briefLoading, setBriefLoading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [drafting, setDrafting] = useState(false)
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [attLoading, setAttLoading] = useState(false)
@@ -191,20 +192,46 @@ export default function CampaignBuilder() {
     setProjectId(guessProject(projects, client.name, market))
   }, [client?.id, market, projects.length])
 
+  async function loadBriefs(): Promise<Brief[] | null> {
+    setBriefLoading(true)
+    const { data, error } = await supabase.functions.invoke('productive-briefs', { body: { action: 'briefs', project_id: projectId } })
+    setBriefLoading(false)
+    if (error || data?.error) {
+      setMessage({ kind: 'err', text: `Briefovi nisu učitani: ${data?.error ?? error?.message}` })
+      return null
+    }
+    setBriefs(data?.briefs ?? [])
+    return data?.briefs ?? []
+  }
+
   useEffect(() => {
     setBriefs([])
     setBriefId('')
-    if (!projectId) return
-    setBriefLoading(true)
-    supabase.functions.invoke('productive-briefs', { body: { action: 'briefs', project_id: projectId } }).then(({ data, error }) => {
-      setBriefLoading(false)
-      if (error || data?.error) {
-        setMessage({ kind: 'err', text: `Briefovi nisu učitani: ${data?.error ?? error?.message}` })
-        return
-      }
-      setBriefs(data?.briefs ?? [])
-    })
+    if (projectId) loadBriefs()
   }, [projectId])
+
+  // New or edited briefs otherwise show up only after the 07:10 daily Productive sync.
+  async function refreshFromProductive() {
+    if (!projectId) return
+    setRefreshing(true); setMessage(null)
+    const before = new Set(briefs.map((b) => b.task_id))
+    const { data, error } = await supabase.functions.invoke('productive-briefs', { body: { action: 'refresh', project_id: projectId } })
+    if (error || data?.error) {
+      setRefreshing(false)
+      setMessage({ kind: 'err', text: `Osvežavanje nije uspelo: ${data?.error ?? error?.message}` })
+      return
+    }
+    const list = await loadBriefs()
+    setRefreshing(false)
+    if (!list) return
+    const added = list.filter((b) => !before.has(b.task_id)).length
+    setMessage({
+      kind: 'ok',
+      text: data.skipped
+        ? 'Projekat je osvežen pre manje od minut; lista je ažurna.'
+        : `Osveženo iz Productive-a: ${data.tasks} taskova, ${list.length} akcija${added ? `, ${added} novih` : ''}.`,
+    })
+  }
 
   const brief = briefs.find((b) => b.task_id === briefId) ?? null
 
@@ -394,7 +421,7 @@ export default function CampaignBuilder() {
       <section className="mb-10 rounded border border-dashed border-[var(--color-line)] bg-white p-5">
         <p className="mb-1 text-sm font-medium">Uvezi iz Productive briefa</p>
         <p className="mb-4 text-xs text-[var(--color-ink-soft)]">
-          Briefovi akcija iz Productive-a (preko Feed Hub-a, osvežava se svako jutro). Izaberi akciju, pa popuni formu: naslovi i opisi se pišu
+          Briefovi akcija iz Productive-a (preko Feed Hub-a, osvežava se svako jutro u 07:10; za nov ili ispravljen brief klikni „Osveži iz Productive-a“). Izaberi akciju, pa popuni formu: naslovi i opisi se pišu
           samo iz briefa (popust, period, uslovi, legal line), a ti ih pregledaš pre čuvanja.
         </p>
         <div className="flex flex-wrap items-end gap-4">
@@ -418,6 +445,15 @@ export default function CampaignBuilder() {
               ))}
             </select>
           </label>
+          <button
+            type="button"
+            onClick={refreshFromProductive}
+            disabled={!projectId || refreshing || briefLoading}
+            title="Povuci sveže taskove ovog projekta iz Productive-a"
+            className="rounded border border-[var(--color-line)] px-3 py-2 text-sm text-[var(--color-ink-soft)] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {refreshing ? 'Osvežavam…' : '↻ Osveži iz Productive-a'}
+          </button>
           {mode === 'search' && (
             <button
               type="button"
