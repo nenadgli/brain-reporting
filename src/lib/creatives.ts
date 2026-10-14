@@ -38,8 +38,9 @@ export type ImageField = 'MARKETING_IMAGE' | 'SQUARE_MARKETING_IMAGE' | 'PORTRAI
 // Saved on drafts; `file` is the name inside the images/ folder of the Editor package.
 export type ImageAsset = { attachment_id: string; name: string; file: string; width: number; height: number; ratio: string; field?: ImageField }
 
-// search: image assets of a Search ad group; pmax: asset group (logos too); dg: Demand Gen ad (square logo, no landscape logo).
-export type AssetMode = 'search' | 'pmax' | 'dg'
+// search: image assets of a Search ad group; pmax: asset group (logos too); dg: Demand Gen ad (square logo,
+// no landscape logo); video: YouTube campaigns (no images).
+export type AssetMode = 'search' | 'pmax' | 'dg' | 'video'
 
 type Shape = { ratio: string; value: number; minW: number; minH: number; field: ImageField }
 

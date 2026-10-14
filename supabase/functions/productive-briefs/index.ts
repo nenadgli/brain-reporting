@@ -2,7 +2,7 @@ import { createClient } from 'jsr:@supabase/supabase-js@2'
 import Anthropic from 'npm:@anthropic-ai/sdk'
 
 // Productive "akcija" briefs (via Feed Hub) → Search campaign drafts in the Nove kampanje form.
-// Actions: projects | briefs | refresh | attachments | file_urls | draft | draft_pmax | draft_demand_gen. Only agency users may call it.
+// Actions: projects | briefs | refresh | attachments | file_urls | draft | draft_pmax | draft_demand_gen | draft_video. Only agency users may call it.
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -70,6 +70,20 @@ const DEMAND_GEN_SCHEMA = {
     rationale: { type: 'string', description: 'kratko na srpskom: sta je uzeto iz briefa i sta treba proveriti' },
   },
   required: ['headlines', 'long_headlines', 'descriptions', 'rationale'],
+  additionalProperties: false,
+}
+
+// Kept within the strictest YouTube ad formats so every text fits the responsive video ad.
+const VIDEO_SCHEMA = {
+  type: 'object',
+  properties: {
+    headlines: { type: 'array', items: { type: 'string' }, description: '5 kratkih naslova, svaki max 15 znakova' },
+    long_headlines: { type: 'array', items: { type: 'string' }, description: '3-5 dugih naslova, svaki max 90 znakova' },
+    descriptions: { type: 'array', items: { type: 'string' }, description: '3-5 opisa, svaki max 70 znakova' },
+    call_to_action: { type: 'string', description: 'poziv na akciju, max 10 znakova, npr. Kupi kartu, Saznaj više' },
+    rationale: { type: 'string', description: 'kratko na srpskom: sta je uzeto iz opisa i sta treba proveriti' },
+  },
+  required: ['headlines', 'long_headlines', 'descriptions', 'call_to_action', 'rationale'],
   additionalProperties: false,
 }
 
@@ -219,6 +233,33 @@ Deno.serve(async (req: Request) => {
         headlines: fit(out.headlines, 40, 5),
         long_headlines: fit(out.long_headlines, 90, 5),
         descriptions: fit(out.descriptions, 90, 5),
+        rationale: out.rationale, dropped_too_long: dropped, served_by: r.model,
+      })
+    }
+
+    // Text for a YouTube video campaign of one title (a film, a product launch, a collection).
+    if (action === 'draft_video') {
+      const title = String(body.title ?? '').trim()
+      if (!title) return json({ error: 'Nedostaje naziv' }, 400)
+      const facts = body.brief ? briefFacts(body.brief) : {}
+      const prompt =
+        `Napravi tekstove za YouTube video oglase (responsive video ad) za „${title}“, klijent ${body.client_name ?? ''}, tržište ${body.market ?? ''}.\n\n` +
+        `CILJ KAMPANJE: ${body.goal === 'views' ? 'pregledi videa (Video views)' : 'doseg (Video reach)'}\n` +
+        `ČINJENICE (jedini izvor): ${JSON.stringify({ ...facts, napomene_tima: body.notes ?? null }, null, 2)}\n\n` +
+        'Pravila:\n' + LANGUAGE_RULES +
+        '- Naslovi najviše 15 znakova, dugi naslovi najviše 90, opisi najviše 70, poziv na akciju najviše 10; brojevi znakova moraju biti tačni.\n' +
+        '- Ako je u pitanju film ili događaj, koristi samo naziv, datum premijere i podatke iz napomena; ne izmišljaj glumce, radnju ni ocene.\n' +
+        '- Tekst prati video koji gledalac vidi: kratko, sa jasnim pozivom (gledaj trejler, kupi kartu, saznaj više).'
+      const r = await structured(VIDEO_SCHEMA, 'Ti si PPC specijalista u agenciji. Pišeš tekstove za YouTube video oglase isključivo na osnovu činjenica koje dobiješ.', prompt)
+      if ('error' in r) return json({ error: r.error }, 502)
+      const out = r.out
+      const dropped: string[] = []
+      const fit = (list: string[], max: number, n: number) => uniq(list).filter((x) => (x.length <= max ? true : (dropped.push(x), false))).slice(0, n)
+      return json({
+        headlines: fit(out.headlines, 15, 5),
+        long_headlines: fit(out.long_headlines, 90, 5),
+        descriptions: fit(out.descriptions, 70, 5),
+        call_to_action: String(out.call_to_action ?? '').slice(0, 10),
         rationale: out.rationale, dropped_too_long: dropped, served_by: r.model,
       })
     }

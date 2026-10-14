@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { type AssetMode, type Attachment, type Brief, type ImageAsset, FIELD_LABEL, assetFileName, checkImage, downloadEditorPackage, imageSize } from '../lib/creatives'
 import PmaxAssetGroupForm from './PmaxAssetGroupForm'
 import DemandGenAdGroupForm from './DemandGenAdGroupForm'
+import VideoCampaignForm from './VideoCampaignForm'
 
 type ClientRow = { id: string; name: string; ga4_store: string | null }
 type Draft = {
@@ -405,7 +406,7 @@ export default function CampaignBuilder() {
       </header>
 
       <div className="mb-6 inline-flex rounded border border-[var(--color-line)] bg-white p-0.5 text-sm">
-        {([['search', 'Search kampanja'], ['pmax', 'PMax asset grupa'], ['dg', 'Demand Gen ad grupa']] as const).map(([m, label]) => (
+        {([['search', 'Search kampanja'], ['pmax', 'PMax asset grupa'], ['dg', 'Demand Gen ad grupa'], ['video', 'YouTube video']] as const).map(([m, label]) => (
           <button key={m} type="button" onClick={() => switchMode(m)}
             className={`rounded px-4 py-1.5 ${mode === m ? 'bg-[var(--color-indigo)] text-white' : 'text-[var(--color-ink-soft)]'}`}>
             {label}
@@ -525,7 +526,7 @@ export default function CampaignBuilder() {
                             {fileSize(a.size_bytes)}
                             {a.productive_url && <> · <a href={a.productive_url} target="_blank" rel="noreferrer" className="underline">Productive</a></>}
                           </span>
-                          {isImage && (
+                          {isImage && mode !== 'video' && (
                             <label className="mt-1 flex items-center gap-1">
                               <input type="checkbox" checked={picked} onChange={() => toggleImage(a)} />
                               <span>{mode === 'pmax' ? 'u asset grupu' : mode === 'dg' ? 'u oglas' : 'u Editor'}</span>
@@ -569,6 +570,10 @@ export default function CampaignBuilder() {
           onSaved={() => { setImages([]); setImageNotes({}) }}
           onMessage={setMessage}
         />
+      )}
+
+      {mode === 'video' && client && (
+        <VideoCampaignForm client={client} market={market} brief={brief} onMessage={setMessage} />
       )}
 
       {mode === 'search' && (<>

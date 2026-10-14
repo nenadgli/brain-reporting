@@ -66,3 +66,6 @@ verify_jwt = true
 
 [functions.export-demand-gen-csv]
 verify_jwt = true
+
+[functions.export-video-csv]
+verify_jwt = true
