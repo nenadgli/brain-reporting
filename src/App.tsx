@@ -15,9 +15,10 @@ import PpcMediaReport from './pages/PpcMediaReport'
 import BudgetPacingReport from './pages/BudgetPacingReport'
 import CampaignBuilder from './pages/CampaignBuilder'
 import PlanProposal from './pages/PlanProposal'
+import MorningReview from './pages/MorningReview'
 import './index.css'
 
-type View = 'summary' | 'client' | 'agency' | 'google_ads' | 'facebook_ads' | 'blended' | 'ga4' | 'owned' | 'chat' | 'ppc' | 'pacing' | 'campaigns' | 'proposal'
+type View = 'summary' | 'client' | 'agency' | 'google_ads' | 'facebook_ads' | 'blended' | 'ga4' | 'owned' | 'chat' | 'ppc' | 'pacing' | 'campaigns' | 'proposal' | 'review'
 
 function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined)
@@ -43,6 +44,7 @@ function App() {
     { key: 'owned', label: 'Push & Newsletter' },
     { key: 'ppc', label: 'PPC Media Plan' },
     { key: 'pacing', label: 'Budget Pacing' },
+    { key: 'review', label: 'Jutarnji pregled' },
     { key: 'proposal', label: 'Predlog plana' },
     { key: 'campaigns', label: 'Nove kampanje' },
   ]
@@ -95,6 +97,7 @@ function App() {
         {view === 'owned' && <OwnedChannelsReport />}
         {view === 'ppc' && <PpcMediaReport />}
         {view === 'pacing' && <BudgetPacingReport />}
+        {view === 'review' && <MorningReview />}
         {view === 'proposal' && <PlanProposal />}
         {view === 'campaigns' && <CampaignBuilder />}
       </div>
