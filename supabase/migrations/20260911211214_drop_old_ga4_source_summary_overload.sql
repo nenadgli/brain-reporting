@@ -1,0 +1,1 @@
+drop function if exists ga4_source_summary(uuid, date, date);

@@ -1,0 +1,1 @@
+alter table public.media_plan_proposal_lines add column archived boolean not null default false;
