@@ -2,7 +2,7 @@ import { createClient } from 'jsr:@supabase/supabase-js@2'
 import Anthropic from 'npm:@anthropic-ai/sdk'
 
 // Productive "akcija" briefs (via Feed Hub) → Search campaign drafts in the Nove kampanje form.
-// Actions: projects | briefs | refresh | attachments | file_urls | draft | draft_pmax | draft_demand_gen | draft_video. Only agency users may call it.
+// Actions: projects | briefs | refresh | attachments | file_urls | draft | draft_pmax | draft_demand_gen | draft_video | draft_display. Only agency users may call it.
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -84,6 +84,18 @@ const VIDEO_SCHEMA = {
     rationale: { type: 'string', description: 'kratko na srpskom: sta je uzeto iz opisa i sta treba proveriti' },
   },
   required: ['headlines', 'long_headlines', 'descriptions', 'call_to_action', 'rationale'],
+  additionalProperties: false,
+}
+
+const DISPLAY_SCHEMA = {
+  type: 'object',
+  properties: {
+    headlines: { type: 'array', items: { type: 'string' }, description: '5 kratkih naslova, svaki max 30 znakova' },
+    long_headline: { type: 'string', description: 'jedan dugi naslov, max 90 znakova' },
+    descriptions: { type: 'array', items: { type: 'string' }, description: '5 opisa, svaki max 90 znakova; bar jedan max 60' },
+    rationale: { type: 'string', description: 'kratko na srpskom: sta je uzeto iz briefa ili napomena i sta treba proveriti' },
+  },
+  required: ['headlines', 'long_headline', 'descriptions', 'rationale'],
   additionalProperties: false,
 }
 
@@ -260,6 +272,32 @@ Deno.serve(async (req: Request) => {
         long_headlines: fit(out.long_headlines, 90, 5),
         descriptions: fit(out.descriptions, 70, 5),
         call_to_action: String(out.call_to_action ?? '').slice(0, 10),
+        rationale: out.rationale, dropped_too_long: dropped, served_by: r.model,
+      })
+    }
+
+    // Text assets for a responsive display ad (from a brief, or a title with the team's notes).
+    if (action === 'draft_display') {
+      const title = String(body.title ?? '').trim()
+      if (!body.brief && !title) return json({ error: 'Nedostaje brief ili naziv' }, 400)
+      const facts = { ...(body.brief ? briefFacts(body.brief) : {}), naziv: title || null, napomene_tima: body.notes ?? null }
+      const prompt =
+        `Napravi tekstove za responsive display oglas (Google Display mreža) za klijenta ${body.client_name ?? ''}, tržište ${body.market ?? ''}.\n\n` +
+        `ČINJENICE (jedini izvor):\n${JSON.stringify(facts, null, 2)}\n\n` +
+        'Pravila:\n' + LANGUAGE_RULES +
+        '- Naslovi najviše 30 znakova, dugi naslov najviše 90, opisi najviše 90 (bar jedan najviše 60); brojevi znakova moraju biti tačni.\n' +
+        '- Display oglas se prikazuje uz sliku na sajtovima i u aplikacijama: kratko, jasna ponuda ili poruka, poziv na akciju.\n' +
+        '- Za film ili događaj koristi samo naziv, datum i podatke iz napomena; ne izmišljaj glumce, radnju ni ocene.'
+      const r = await structured(DISPLAY_SCHEMA, 'Ti si PPC specijalista u agenciji. Pišeš tekstove za responsive display oglase isključivo na osnovu činjenica koje dobiješ.', prompt)
+      if ('error' in r) return json({ error: r.error }, 502)
+      const out = r.out
+      const dropped: string[] = []
+      const fit = (list: string[], max: number, n: number) => uniq(list).filter((x) => (x.length <= max ? true : (dropped.push(x), false))).slice(0, n)
+      const lh = String(out.long_headline ?? '').trim()
+      return json({
+        headlines: fit(out.headlines, 30, 5),
+        long_headline: lh.length <= 90 ? lh : (dropped.push(lh), ''),
+        descriptions: fit(out.descriptions, 90, 5),
         rationale: out.rationale, dropped_too_long: dropped, served_by: r.model,
       })
     }

@@ -39,8 +39,8 @@ export type ImageField = 'MARKETING_IMAGE' | 'SQUARE_MARKETING_IMAGE' | 'PORTRAI
 export type ImageAsset = { attachment_id: string; name: string; file: string; width: number; height: number; ratio: string; field?: ImageField }
 
 // search: image assets of a Search ad group; pmax: asset group (logos too); dg: Demand Gen ad (square logo,
-// no landscape logo); video: YouTube campaigns (no images).
-export type AssetMode = 'search' | 'pmax' | 'dg' | 'video'
+// no landscape logo); video: YouTube campaigns (no images); display: responsive display ad (1.91:1, 1:1, logos).
+export type AssetMode = 'search' | 'pmax' | 'dg' | 'video' | 'display'
 
 type Shape = { ratio: string; value: number; minW: number; minH: number; field: ImageField }
 
@@ -64,7 +64,10 @@ export const FIELD_LABEL: Record<ImageField, string> = {
 export function checkImage(a: Attachment, w: number, h: number, mode: AssetMode): { ratio: string; field: ImageField } | { problem: string } {
   if (!/^image\/(jpeg|png|gif)$/.test(a.content_type ?? '')) return { problem: 'format nije JPG/PNG/GIF' }
   if ((a.size_bytes ?? 0) > 5 * 1024 * 1024) return { problem: 'veće od 5 MB' }
-  const shapes = mode === 'pmax' ? [...MARKETING_SHAPES, LANDSCAPE_LOGO] : MARKETING_SHAPES
+  // Responsive display ads take landscape and square images (no 4:5) and both logo shapes.
+  const shapes = mode === 'pmax' ? [...MARKETING_SHAPES, LANDSCAPE_LOGO]
+    : mode === 'display' ? [MARKETING_SHAPES[0], MARKETING_SHAPES[1], LANDSCAPE_LOGO]
+    : MARKETING_SHAPES
   const shape = shapes.find((s) => Math.abs(w / h / s.value - 1) <= 0.02)
   if (!shape) return { problem: `${w}×${h} nije ${shapes.map((s) => s.ratio).join(', ')}` }
   // A square file named like a logo is a logo in PMax and Demand Gen (smaller minimum).

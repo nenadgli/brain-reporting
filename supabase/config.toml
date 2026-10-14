@@ -69,3 +69,6 @@ verify_jwt = true
 
 [functions.export-video-csv]
 verify_jwt = true
+
+[functions.export-display-csv]
+verify_jwt = true

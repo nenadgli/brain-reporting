@@ -4,6 +4,7 @@ import { type AssetMode, type Attachment, type Brief, type ImageAsset, FIELD_LAB
 import PmaxAssetGroupForm from './PmaxAssetGroupForm'
 import DemandGenAdGroupForm from './DemandGenAdGroupForm'
 import VideoCampaignForm from './VideoCampaignForm'
+import DisplayAdForm from './DisplayAdForm'
 
 type ClientRow = { id: string; name: string; ga4_store: string | null }
 type Draft = {
@@ -406,7 +407,7 @@ export default function CampaignBuilder() {
       </header>
 
       <div className="mb-6 inline-flex rounded border border-[var(--color-line)] bg-white p-0.5 text-sm">
-        {([['search', 'Search kampanja'], ['pmax', 'PMax asset grupa'], ['dg', 'Demand Gen ad grupa'], ['video', 'YouTube video']] as const).map(([m, label]) => (
+        {([['search', 'Search kampanja'], ['pmax', 'PMax asset grupa'], ['dg', 'Demand Gen ad grupa'], ['video', 'YouTube video'], ['display', 'Display oglas']] as const).map(([m, label]) => (
           <button key={m} type="button" onClick={() => switchMode(m)}
             className={`rounded px-4 py-1.5 ${mode === m ? 'bg-[var(--color-indigo)] text-white' : 'text-[var(--color-ink-soft)]'}`}>
             {label}
@@ -529,7 +530,7 @@ export default function CampaignBuilder() {
                           {isImage && mode !== 'video' && (
                             <label className="mt-1 flex items-center gap-1">
                               <input type="checkbox" checked={picked} onChange={() => toggleImage(a)} />
-                              <span>{mode === 'pmax' ? 'u asset grupu' : mode === 'dg' ? 'u oglas' : 'u Editor'}</span>
+                              <span>{mode === 'pmax' ? 'u asset grupu' : mode === 'dg' || mode === 'display' ? 'u oglas' : 'u Editor'}</span>
                             </label>
                           )}
                           {imageNotes[a.id] && <span className={`block ${picked ? 'text-[var(--color-ink-soft)]' : 'text-[var(--color-rust)]'}`}>{imageNotes[a.id]}</span>}
@@ -563,6 +564,17 @@ export default function CampaignBuilder() {
 
       {mode === 'dg' && client && (
         <DemandGenAdGroupForm
+          client={client}
+          market={market}
+          brief={brief}
+          images={images}
+          onSaved={() => { setImages([]); setImageNotes({}) }}
+          onMessage={setMessage}
+        />
+      )}
+
+      {mode === 'display' && client && (
+        <DisplayAdForm
           client={client}
           market={market}
           brief={brief}
