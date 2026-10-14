@@ -74,7 +74,8 @@ export default function PmaxAssetGroupForm({ client, market, brief, images, onSa
   const [drafts, setDrafts] = useState<PmaxDraft[]>([])
 
   useEffect(() => {
-    setBusinessName(client.name.replace(/\s+(RS|HR|BA|ME|SI|AL)$/i, '').slice(0, 25))
+    // F&F PMax campaigns use Brand guidelines: business name and logos live on the campaign, so empty here.
+    setBusinessName('')
     supabase.rpc('pmax_campaigns', { p_client_id: client.id }).then(({ data }) => {
       const list = ((data ?? []) as PmaxCampaign[]).filter((c) => /pmax|performance/i.test(c.campaign))
       setCampaigns(list)
@@ -208,7 +209,8 @@ export default function PmaxAssetGroupForm({ client, market, brief, images, onSa
     const label = ds.length === 1 ? ds[0].asset_group_name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') : 'pmax'
     const res = await downloadEditorPackage(`editor_pmax_${slug}_${label}`, data, ds.flatMap((d) => d.images ?? []))
     setBusy(false)
-    onMessage({ kind: res.ok ? 'ok' : 'err', text: res.text })
+    const imgs = ds.reduce((n, d) => n + (d.images?.length ?? 0), 0)
+    onMessage({ kind: res.ok ? 'ok' : 'err', text: res.text + (imgs ? ` Slike (${imgs}) su u folderu images/: u Editoru ih dodaj asset grupi ručno (Editor ne uvozi slike asset grupe iz CSV-a).` : '') })
     loadDrafts()
   }
 
@@ -264,7 +266,7 @@ export default function PmaxAssetGroupForm({ client, market, brief, images, onSa
             <textarea value={descriptions} onChange={(e) => setDescriptions(e.target.value)} rows={6} className={inputCls} /></label>
           <label className="md:col-span-2"><span className={labelCls}>Teme pretrage (search themes, do 25) · {n(th, 80)}</span>
             <textarea value={themes} onChange={(e) => setThemes(e.target.value)} rows={6} className={inputCls} /></label>
-          <label><span className={labelCls}>Naziv firme ({businessName.length}/25)</span>
+          <label><span className={labelCls}>Naziv firme ({businessName.length}/25; prazno ako kampanja koristi Brand guidelines)</span>
             <input value={businessName} onChange={(e) => setBusinessName(e.target.value)} className={inputCls} /></label>
           <label><span className={labelCls}>Call to action</span>
             <select value={cta} onChange={(e) => setCta(e.target.value)} className={inputCls}>

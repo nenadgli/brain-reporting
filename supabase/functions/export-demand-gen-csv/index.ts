@@ -15,15 +15,15 @@ const CORS = {
 }
 const json = (obj: unknown, status: number) => new Response(JSON.stringify(obj), { status, headers: { ...CORS, 'Content-Type': 'application/json' } })
 
-// NOTE: column names are not yet checked against a real Editor export of a Demand Gen ad group.
-// Adjust them here once a sample export is available; nothing else depends on the names.
+// NOTE: shared columns follow Editor's PMax export (Ad Group, Ad Group Status, Video ID n); the
+// ad-type and image columns are not yet checked against an Editor export of a Demand Gen ad group.
 const HEADLINES = Array.from({ length: 5 }, (_, i) => `Headline ${i + 1}`)
 const LONG_HEADLINES = Array.from({ length: 5 }, (_, i) => `Long headline ${i + 1}`)
 const DESCRIPTIONS = Array.from({ length: 5 }, (_, i) => `Description ${i + 1}`)
 const HEADER = [
-  'Campaign', 'Ad group', 'Ad group status', 'Ad type', 'Status', 'Final URL',
+  'Campaign', 'Ad Group', 'Ad Group Status', 'Ad type', 'Status', 'Final URL',
   ...HEADLINES, ...LONG_HEADLINES, ...DESCRIPTIONS,
-  'Business name', 'Call to action', 'Image', 'Square image', 'Portrait image', 'Logo', 'Video ID',
+  'Business name', 'Call to action', 'Image', 'Square image', 'Portrait image', 'Logo', ...Array.from({ length: 5 }, (_, i) => `Video ID ${i + 1}`),
 ]
 // Image field → CSV column.
 const IMAGE_COLUMN: Record<string, string> = {
@@ -40,7 +40,7 @@ function esc(v: unknown): string {
 
 // deno-lint-ignore no-explicit-any
 function rowsFor(d: any): Record<string, unknown>[] {
-  const key = { Campaign: d.campaign_name, 'Ad group': d.ad_group_name }
+  const key = { Campaign: d.campaign_name, 'Ad Group': d.ad_group_name }
   const texts = (r: Record<string, unknown>, long: boolean) => {
     ;(d.headlines ?? []).slice(0, 5).forEach((h: string, i: number) => { r[HEADLINES[i]] = h })
     if (long) (d.long_headlines ?? []).slice(0, 5).forEach((h: string, i: number) => { r[LONG_HEADLINES[i]] = h })
@@ -48,7 +48,7 @@ function rowsFor(d: any): Record<string, unknown>[] {
     return r
   }
   const common = { 'Final URL': d.final_url, 'Business name': d.business_name, 'Call to action': d.call_to_action, Status: 'Paused' }
-  const rows: Record<string, unknown>[] = [{ ...key, 'Ad group status': 'Paused' }]
+  const rows: Record<string, unknown>[] = [{ ...key, 'Ad Group Status': 'Paused' }]
   const ad = texts({ ...key, ...common, 'Ad type': 'Demand Gen multi-image ad' }, false)
   // The first image of each kind goes on the ad row; the rest follow as rows of the same ad.
   const extra: Record<string, unknown>[] = []
@@ -62,8 +62,8 @@ function rowsFor(d: any): Record<string, unknown>[] {
   if ((d.video_ids ?? []).length) {
     const logo = (d.images ?? []).find((i: { field?: string }) => i.field === 'LOGO')
     const video = texts({ ...key, ...common, 'Ad type': 'Demand Gen video ad', Logo: logo?.file ? `images/${logo.file}` : null }, true)
-    video['Video ID'] = d.video_ids[0]
-    rows.push(video, ...d.video_ids.slice(1).map((v: string) => ({ ...key, 'Ad type': 'Demand Gen video ad', 'Video ID': v })))
+    d.video_ids.slice(0, 5).forEach((v: string, i: number) => { video[`Video ID ${i + 1}`] = v })
+    rows.push(video)
   }
   return rows
 }
