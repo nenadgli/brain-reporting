@@ -20,9 +20,14 @@ const HEADLINES = Array.from({ length: 15 }, (_, i) => `Headline ${i + 1}`)
 const LONG_HEADLINES = Array.from({ length: 5 }, (_, i) => `Long headline ${i + 1}`)
 const DESCRIPTIONS = Array.from({ length: 5 }, (_, i) => `Description ${i + 1}`)
 const VIDEOS = Array.from({ length: 15 }, (_, i) => `Video ID ${i + 1}`)
+// Audience signal of the asset group (draft.audience holds these keys).
+const AUDIENCE = [
+  'Audience signal', 'Age demographic', 'Gender demographic', 'Income demographic', 'Parental status demographic',
+  'Remarketing audience segments', 'Interest categories', 'Life events', 'Custom audience segments', 'Detailed demographics',
+]
 const HEADER = [
   'Campaign', 'Asset Group', ...HEADLINES, ...LONG_HEADLINES, ...DESCRIPTIONS,
-  'Call to action', 'Business name', ...VIDEOS, 'Path 1', 'Path 2', 'Final URL', 'Search theme', 'Asset Group Status', 'Status',
+  'Call to action', 'Business name', ...VIDEOS, 'Path 1', 'Path 2', 'Final URL', ...AUDIENCE, 'Search theme', 'Asset Group Status', 'Status',
 ]
 
 function esc(v: unknown): string {
@@ -42,6 +47,7 @@ function rowsFor(d: any): Record<string, unknown>[] {
   ;(d.long_headlines ?? []).slice(0, 5).forEach((h: string, i: number) => { main[LONG_HEADLINES[i]] = h })
   ;(d.descriptions ?? []).slice(0, 5).forEach((x: string, i: number) => { main[DESCRIPTIONS[i]] = x })
   ;(d.video_ids ?? []).slice(0, 15).forEach((v: string, i: number) => { main[VIDEOS[i]] = v })
+  for (const k of AUDIENCE) if (d.audience?.[k]) main[k] = d.audience[k]
   const rows = [main]
   // One row per search theme, as in Editor's export.
   for (const t of d.search_themes ?? []) rows.push({ ...key, 'Search theme': t, 'Asset Group Status': 'Paused', Status: 'Enabled' })

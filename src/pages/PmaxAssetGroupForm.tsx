@@ -33,6 +33,44 @@ const STATUS_LABEL: Record<PmaxDraft['status'], string> = { draft: 'Nacrt', expo
 // Editor values; empty = Automated.
 const CTAS = ['', 'Shop now', 'Learn more', 'Get offer', 'Sign up', 'Contact us']
 
+// Audience signal fields, named and formatted like Google Ads Editor's columns (lists separated by ";").
+const AUDIENCE_FIELDS: [string, string][] = [
+  ['Remarketing audience segments', 'Remarketing segmenti (vaši podaci)'],
+  ['Custom audience segments', 'Custom segmenti'],
+  ['Interest categories', 'Interesovanja'],
+  ['Life events', 'Životni događaji'],
+  ['Detailed demographics', 'Detaljna demografija'],
+  ['Age demographic', 'Godine'],
+  ['Gender demographic', 'Pol'],
+  ['Income demographic', 'Prihodi'],
+  ['Parental status demographic', 'Roditeljski status'],
+  ['Audience signal', 'Naziv sačuvane publike (Audience signal)'],
+]
+type Audience = Record<string, string>
+
+// Reads the audience signal of the first asset group in an Editor export (UTF-16 tab-separated, or UTF-8 CSV).
+async function audienceFromEditorFile(file: File): Promise<Audience> {
+  const buf = new Uint8Array(await file.arrayBuffer())
+  const utf16 = buf[0] === 0xff && buf[1] === 0xfe
+  const text = new TextDecoder(utf16 ? 'utf-16le' : 'utf-8').decode(buf).replace(/^\ufeff/, '')
+  const rows = text.split(/\r?\n/).filter(Boolean)
+  const sep = rows[0].includes('\t') ? '\t' : ','
+  // Editor's own exports are tab-separated without quoting; a CSV may quote fields.
+  const split = (line: string) => sep === '\t' ? line.split('\t')
+    : (line.match(/("([^"]|"")*"|[^,]*)(,|$)/g) ?? []).map((c) => c.replace(/,$/, '').replace(/^"|"$/g, '').replace(/""/g, '"'))
+  const head = split(rows[0])
+  const col = (name: string) => head.findIndex((h) => h.trim().toLowerCase() === name.toLowerCase())
+  const ag = col('Asset Group')
+  for (const line of rows.slice(1)) {
+    const cells = split(line)
+    if (ag < 0 || !cells[ag]) continue
+    const out: Audience = {}
+    for (const [k] of AUDIENCE_FIELDS) { const i = col(k); if (i >= 0 && cells[i]?.trim()) out[k] = cells[i].trim() }
+    if (Object.keys(out).length) return out
+  }
+  return {}
+}
+
 const lines = (s: string) => s.split('\n').map((x) => x.trim()).filter(Boolean)
 const pad = (n: number) => String(n).padStart(2, '0')
 
@@ -66,6 +104,10 @@ export default function PmaxAssetGroupForm({ client, market, brief, images, onSa
   const [descriptions, setDescriptions] = useState('')
   const [businessName, setBusinessName] = useState('')
   const [cta, setCta] = useState('')
+  const [audience, setAudience] = useState<Audience>({})
+  const [audienceDefault, setAudienceDefault] = useState<Audience>({})
+  const [rememberAudience, setRememberAudience] = useState(false)
+  const [audienceNote, setAudienceNote] = useState('')
   const [themes, setThemes] = useState('')
   const [videos, setVideos] = useState('')
   const [rationale, setRationale] = useState('')
@@ -101,6 +143,27 @@ export default function PmaxAssetGroupForm({ client, market, brief, images, onSa
     else setDrafts((data ?? []) as PmaxDraft[])
   }
   useEffect(() => { loadDrafts() }, [client.id])
+
+  // The client's usual audience signal fills the form; the team can change it per asset group.
+  useEffect(() => {
+    setAudience({}); setAudienceDefault({}); setAudienceNote('')
+    supabase.from('client_editor_defaults').select('pmax_audience').eq('client_id', client.id).maybeSingle().then(({ data }) => {
+      const a = (data?.pmax_audience ?? {}) as Audience
+      setAudience(a); setAudienceDefault(a)
+    })
+  }, [client.id])
+
+  async function importAudience(file: File | undefined) {
+    if (!file) return
+    try {
+      const a = await audienceFromEditorFile(file)
+      if (!Object.keys(a).length) { setAudienceNote('U fajlu nije nađen audience signal asset grupe.'); return }
+      setAudience(a); setRememberAudience(true)
+      setAudienceNote(`Učitano iz „${file.name}“: ${Object.keys(a).length} polja.`)
+    } catch (e) {
+      setAudienceNote(`Fajl nije pročitan: ${(e as Error).message}`)
+    }
+  }
 
   async function draftFromBrief() {
     if (!brief) return
@@ -158,6 +221,7 @@ export default function PmaxAssetGroupForm({ client, market, brief, images, onSa
   if (!logos) warnings.push('Nema logotipa; ok samo ako kampanja koristi Brand guidelines.')
   if (!businessName.trim()) warnings.push('Nema naziva firme; ok samo ako kampanja koristi Brand guidelines.')
   if (!vids.length) warnings.push('Bez videa Google sam pravi video od slika; YT verzije iz podtaska prvo okači na YouTube pa nalepi linkove.')
+  if (!Object.values(audience).some((v) => v?.trim())) warnings.push('Nema audience signala; asset grupa će učiti sporije (učitaj ga iz Editor exporta).')
   if (groupName && campaigns.find((c) => c.campaign === campaign)?.asset_groups.includes(groupName.trim())) warnings.push('Asset grupa sa tim imenom već postoji u kampanji.')
 
   async function save() {
@@ -182,12 +246,19 @@ export default function PmaxAssetGroupForm({ client, market, brief, images, onSa
       brief_title: brief?.title ?? null,
       start_date: brief?.start_date ?? null,
       end_date: brief?.end_date ?? null,
+      audience: Object.fromEntries(Object.entries(audience).filter(([, v]) => v.trim())),
       created_by: 'brain-ui',
     })
     setBusy(false)
     if (error) {
       onMessage({ kind: 'err', text: `Čuvanje nije uspelo: ${error.message}` })
       return
+    }
+    if (rememberAudience) {
+      const clean = Object.fromEntries(Object.entries(audience).filter(([, v]) => v.trim()))
+      const { error: de } = await supabase.from('client_editor_defaults')
+        .upsert({ client_id: client.id, pmax_audience: clean, updated_at: new Date().toISOString() }, { onConflict: 'client_id' })
+      if (!de) { setAudienceDefault(clean); setRememberAudience(false) }
     }
     onMessage({ kind: 'ok', text: `Asset grupa „${groupName.trim()}“ sačuvana kao nacrt (${images.length} slika, ${vids.length} videa). Izvozi se kao Paused.` })
     setHeadlines(''); setLongHeadlines(''); setDescriptions(''); setThemes(''); setVideos(''); setRationale('')
@@ -274,6 +345,35 @@ export default function PmaxAssetGroupForm({ client, market, brief, images, onSa
             </select></label>
           <label className="md:col-span-2"><span className={labelCls}>YouTube videi, link ili ID po redu (do 5) · {vids.filter(Boolean).length}</span>
             <textarea value={videos} onChange={(e) => setVideos(e.target.value)} rows={3} placeholder="https://youtu.be/…" className={inputCls} /></label>
+          <details className="md:col-span-4 rounded border border-[var(--color-line)] p-3" open={!Object.keys(audience).length}>
+            <summary className="cursor-pointer text-sm font-medium">
+              Audience signal {Object.keys(audience).filter((k) => audience[k]?.trim()).length ? `· ${Object.keys(audience).filter((k) => audience[k]?.trim()).length} polja` : '· nije podešen'}
+            </summary>
+            <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+              Ide u export kao signal asset grupe. Vrednosti kao u Google Ads Editoru, više stavki odvojeno sa „;“. Najlakše: izvezi postojeću PMax kampanju iz Editora i učitaj fajl ovde.
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
+              <label className="cursor-pointer rounded border border-[var(--color-line)] bg-white px-3 py-1">
+                Učitaj iz Editor exporta
+                <input type="file" accept=".csv,.tsv,.txt" className="hidden" onChange={(e) => importAudience(e.target.files?.[0])} />
+              </label>
+              <label className="flex items-center gap-1">
+                <input type="checkbox" checked={rememberAudience} onChange={(e) => setRememberAudience(e.target.checked)} />
+                zapamti kao podrazumevano za {client.name}
+              </label>
+              {JSON.stringify(audience) !== JSON.stringify(audienceDefault) && Object.keys(audienceDefault).length > 0 && (
+                <button type="button" onClick={() => setAudience(audienceDefault)} className="underline">vrati podrazumevano</button>
+              )}
+              {audienceNote && <span className="text-[var(--color-ink-soft)]">{audienceNote}</span>}
+            </div>
+            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+              {AUDIENCE_FIELDS.map(([k, label]) => (
+                <label key={k}><span className={labelCls}>{label}</span>
+                  <textarea rows={k === 'Interest categories' || k === 'Custom audience segments' ? 3 : 1} value={audience[k] ?? ''}
+                    onChange={(e) => setAudience({ ...audience, [k]: e.target.value })} className={inputCls} /></label>
+              ))}
+            </div>
+          </details>
           <div className="md:col-span-4 text-xs text-[var(--color-ink-soft)]">
             Izabrane slike: {images.length === 0 ? 'nijedna' : images.map((i) => `${i.name} (${FIELD_LABEL[i.field ?? 'MARKETING_IMAGE']})`).join(' · ')}
           </div>
