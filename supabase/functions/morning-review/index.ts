@@ -110,6 +110,47 @@ async function calendarCandidates(clientId: string, projectId: string, leadDays:
   return out
 }
 
+// ---- Account limits and monthly campaign budgets (from the daily settings snapshot) ----
+async function budgetCandidates(clientId: string): Promise<Candidate[]> {
+  const out: Candidate[] = []
+  // Meta account spending limit: when it runs out, every campaign on the account stops.
+  const { data: lim } = await sb.from('meta_account_limits').select('account_id, account_name, spend_cap, amount_spent, snapshot_date')
+    .eq('client_id', clientId).order('snapshot_date', { ascending: false }).limit(5)
+  const lastSnap = lim?.[0]?.snapshot_date
+  const since = new Date(Date.now() - 8 * 864e5).toISOString().slice(0, 10)
+  const { data: fb } = await sb.from('facebook_ads_metrics').select('report_date, spend').eq('client_id', clientId).gte('report_date', since)
+  const days = new Set((fb ?? []).map((r) => r.report_date)).size || 1
+  const avgDaily = (fb ?? []).reduce((n, r) => n + (Number(r.spend) || 0), 0) / days
+  for (const a of (lim ?? []).filter((x) => x.snapshot_date === lastSnap)) {
+    const cap = Number(a.spend_cap), spent = Number(a.amount_spent)
+    if (!cap) continue
+    const remaining = Math.max(0, cap - spent)
+    const daysLeft = avgDaily > 0 ? Math.floor(remaining / avgDaily) : null
+    if (spent / cap < 0.9 && (daysLeft == null || daysLeft >= 7)) continue
+    out.push({
+      check_type: 'meta_cap', fingerprint: `meta_cap:${a.account_id}:${Math.round(cap)}`,
+      severity: daysLeft != null && daysLeft < 3 ? 'hitno' : 'visoko', impact_eur: null,
+      evidence: { account: a.account_name ?? a.account_id, spend_cap: Math.round(cap), amount_spent: Math.round(spent),
+                  remaining: Math.round(remaining), used_pct: Math.round(spent / cap * 100),
+                  avg_daily_spend: Math.round(avgDaily), days_left: daysLeft, snapshot_date: a.snapshot_date },
+    })
+  }
+  // Campaigns off their monthly budget (only where the team entered one in Budžeti).
+  const { data: plan } = await sb.rpc('budget_plan', { p_client_id: clientId })
+  const off = ((plan ?? []) as Record<string, unknown>[]).filter((r) => r.monthly_budget != null && ['prekoraceno', 'prebrzo', 'presporo'].includes(String(r.status)))
+  if (off.length) {
+    const items = off.map((r) => ({ network: r.network, campaign: r.campaign, status: r.status, monthly_budget: Math.round(Number(r.monthly_budget)),
+      spent_mtd: Math.round(Number(r.spent_mtd)), projected_month: Math.round(Number(r.projected_month)), recommended_daily: r.recommended_daily }))
+    out.push({
+      check_type: 'campaign_budgets', fingerprint: `campaign_budgets:${String(off[0].data_date)}`,
+      severity: off.some((r) => r.status === 'prekoraceno') ? 'visoko' : 'srednje',
+      impact_eur: Math.round(items.reduce((n, i) => n + Math.abs(i.projected_month - i.monthly_budget), 0)),
+      evidence: { date: off[0].data_date, days_left: off[0].days_left, items },
+    })
+  }
+  return out
+}
+
 // ---- Claude: classify search terms, word the other findings ----
 const OUTPUT_SCHEMA = {
   type: 'object',
@@ -153,12 +194,12 @@ const SYSTEM =
   'Pišeš na srpskom, latinicom sa svim dijakritičkim znacima (č, ć, š, ž, đ), kratko i konkretno, bez uvoda i bez fraza. ' +
   'Koristi ISKLJUCIVO brojeve iz dokaza (evidence) tog istog nalaza; ne racunaj nove brojeve, ne prenosi brojeve iz drugih nalaza i ne izmisljaj podatke. ' +
   'Svaki broj koji napises automatski se proverava; tekst sa brojem kog nema u dokazu se odbacuje. ' +
-  'Datume pisi kao 13.10., iznose kao u dokazu sa oznakom EUR. Ne koristi engleske reci kao baseline; pisi "uobicajeno (prosek istog dana u nedelji)". ' +
+  'Datume pisi kao 13.10., iznose kao u dokazu sa oznakom valute klijenta. Ne koristi engleske reci kao baseline; pisi "uobicajeno (prosek istog dana u nedelji)". ' +
   'Nista se ne menja u nalogu automatski; predlog je za coveka koji odobrava.'
 
 function buildPrompt(clientName: string, params: Record<string, unknown>, dataDate: string, stale: boolean, terms: Candidate[], others: Candidate[]) {
   return [
-    `Klijent: ${clientName}. Podaci zakljucno sa ${dataDate}.${stale ? ' UPOZORENJE: jutrosnji sync podataka nije uspeo, podaci mogu biti nepotpuni.' : ''}`,
+    `Klijent: ${clientName}. Valuta naloga: ${CUR}. Podaci zakljucno sa ${dataDate}.${stale ? ' UPOZORENJE: jutrosnji sync podataka nije uspeo, podaci mogu biti nepotpuni.' : ''}`,
     `Pravila klijenta: konkurenti ${JSON.stringify(params.competitors)}; brendovi koje klijent prodaje ${JSON.stringify(params.brands_sold)}.`,
     '',
     'ZADATAK 1, search termini koji su trosili bez konverzije. Za svaki termin odredi:',
@@ -168,10 +209,12 @@ function buildPrompt(clientName: string, params: Record<string, unknown>, dataDa
     JSON.stringify(terms.map((t) => t.evidence)),
     '',
     'ZADATAK 2, ostali nalazi. Naslov vec postoji (title); za svaki napisi detail i proposal i proceni severity.',
-    '- Pacing: poredi sa planom po flightovima (plan_to_date), ne linearno; linear_to_date pomeni samo ako pomaze. Predlog koristi daily_adjustment (EUR dnevno za always-on kampanje) i napomenu o predstojecim flightovima (upcoming_flights).',
+    '- Pacing: poredi sa planom po flightovima (plan_to_date), ne linearno; linear_to_date pomeni samo ako pomaze. Predlog koristi daily_adjustment (iznos dnevno za always-on kampanje) i napomenu o predstojecim flightovima (upcoming_flights).',
     '- spend_stopped: vise kampanja je palo na 0. Za svaku stavku pogledaj last_spend_date, days_without_spend, planned_flights_that_day i flights_ended_last_3_days: ako se flight upravo zavrsio, gasenje je verovatno planirano; ako planirani flight jos traje, a kampanja ne trosi vise od jednog dana, to je problem. Reci za koje kampanje je sta. keep=false samo ako su sve planirane.',
     '- spend_anomaly: kampanja je znacajno porasla ili pala; koristi planned_flights_that_day i flights_ended_last_3_days da objasnis.',
     '- Tracking i pad konverzija: proveri da li to moze biti kasnjenje podataka za poslednji dan; predlozi proveru u nalogu pre bilo kakve izmene.',
+    '- meta_cap: Meta nalog ima limit potrošnje (spend_cap); kad se dostigne, sve kampanje na nalogu staju. Predlog: povećati limit u Billing podešavanjima ili javiti klijentu.',
+    '- campaign_budgets: kampanje odstupaju od mesečnog budžeta koji je tim uneo; predlog koristi recommended_daily (dnevni budžet da se ostatak potroši ravnomerno).',
     '- Kalendar akcija: brief_prep = akcija pocinje uskoro, a u Brain-u nema nacrta; brief_ended = akcija je zavrsena, a asset grupa jos trosi.',
     '- keep=false samo kad je ocigledno da nalaz nije problem.',
     JSON.stringify(others.map((o) => ({ fingerprint: o.fingerprint, check_type: o.check_type, severity: o.severity, title: titleFor(o), evidence: o.evidence }))),
@@ -198,14 +241,18 @@ async function askClaude(prompt: string): Promise<{ out: any; model: string }> {
 
 const fmt = (n: number) => n.toLocaleString('sr-RS', { maximumFractionDigits: 0 })
 const fmt1 = (n: unknown) => Number(n).toLocaleString('sr-RS', { maximumFractionDigits: 1 })
-const eur = (n: unknown) => `${fmt(Number(n))} EUR`
+// Accounts report in their own currency (review_settings.params.currency); set per run.
+let CUR = 'EUR'
+const eur = (n: unknown) => `${fmt(Number(n))} ${CUR}`
 const dm = (iso: unknown) => { const v = String(iso ?? ''); return v.length >= 10 ? `${Number(v.slice(8, 10))}.${Number(v.slice(5, 7))}.` : v }
-// "AOn (Mkt:RS;Ct:PMax)" -> "AOn PMax", "Remarketinga(Mkt:RS;Ct:Conversions;Ph:Bof)" -> "Remarketinga Conversions"
+// "AOn (Mkt:RS;Ct:PMax)" -> "AOn RS PMax", "Remarketinga(Mkt:RS;Ct:Conversions;Ph:Bof)" -> "Remarketinga RS Conversions"
 const short = (c: unknown) => {
   const v = String(c ?? '')
   const base = v.replace(/\(.*$/, '').replace(/[_\s]+$/, '')
   const ct = v.match(/Ct:([^;)]+)/)?.[1]
-  return ct ? `${base} ${ct}` : base
+  const mkt = v.match(/Mkt:([^;)]+)/)?.[1]
+  // The market tells apart same-named campaigns in multi-country accounts (Replay DE/UK/IT).
+  return [base, mkt, ct].filter(Boolean).join(' ')
 }
 const NET: Record<string, string> = { google: 'Google', meta: 'Meta' }
 // Serbian count agreement: 1 kampanja, 2-4 kampanje, 5+ kampanja (11-14 always kampanja).
@@ -227,6 +274,10 @@ function titleFor(c: Candidate): string {
       return `${NET[e.network]}: ${eur(e.spend)} troška i 0 konverzija ${dm(e.date)}`
     case 'conv_drop':
       return `${NET[e.network]} konverzije ${dm(e.date)}: ${fmt1(e.conversions)} naspram uobičajenih ${fmt1(e.baseline_conversions)} (${e.change_pct}%)`
+    case 'meta_cap':
+      return `Meta limit potrošnje „${e.account}“: iskorišćeno ${e.used_pct}% (${eur(e.amount_spent)} od ${eur(e.spend_cap)})${e.days_left != null ? `, dovoljno za još oko ${e.days_left} dana` : ''}`
+    case 'campaign_budgets':
+      return `${e.items.length} ${kampanja(e.items.length)} odstupa od mesečnog budžeta: ${e.items.slice(0, 3).map((i: { campaign: string }) => short(i.campaign)).join(', ')}${e.items.length > 3 ? ' i druge' : ''}`
     case 'brief_prep':
       return `Akcija „${e.action}“ počinje ${dm(e.start_date)}, a u Brain-u nema pripremljene asset grupe`
     case 'brief_ended':
@@ -247,6 +298,10 @@ function fallbackFor(c: Candidate): { detail: string; proposal: string } {
         detail: e.items.map((i: Record<string, unknown>) => `${NET[String(i.network)]} ${short(i.campaign)}: poslednji trošak ${i.last_spend_date ? dm(i.last_spend_date) : 'nepoznat'}`).join('; ') + '.',
         proposal: 'Proveriti u nalogu status, budžet i plaćanje za ove kampanje; za one čiji je flight završen, gašenje je očekivano.',
       }
+    case 'meta_cap':
+      return { detail: `Preostalo ${eur(e.remaining)} uz prosečnu potrošnju od ${eur(e.avg_daily_spend)} dnevno.`, proposal: 'Povećati limit potrošnje naloga u Meta Billing podešavanjima ili dogovoriti sa klijentom.' }
+    case 'campaign_budgets':
+      return { detail: e.items.map((i: Record<string, unknown>) => `${short(i.campaign)}: projekcija ${eur(i.projected_month)} za budžet ${eur(i.monthly_budget)}`).join('; ') + '.', proposal: 'Podesiti dnevne budžete prema predlogu na stranici Budžeti (Editor CSV).' }
     case 'pacing':
       return { detail: `Plan za mesec je ${eur(e.plan_month)}; ostalo je ${e.remaining_days} dana.`, proposal: `Dnevni budžet always-on kampanja pomeriti za ${eur(e.daily_adjustment)}.` }
     default:
@@ -290,6 +345,19 @@ function groupStopped(cands: Candidate[]): Candidate[] {
   }]
 }
 
+// "1 konkurentski termin je potrošio", "3 konkurentska termina su potrošila", "7 konkurentskih termina je potrošilo".
+function termCount(n: number, action: string): string {
+  const adj: Record<string, [string, string, string]> = {
+    iskljuci_iz_brend_kampanja: ['konkurentski', 'konkurentska', 'konkurentskih'],
+    iskljuci_svuda: ['nebitan', 'nebitna', 'nebitnih'],
+    zadrzi: ['relevantan', 'relevantna', 'relevantnih'],
+  }
+  const [one, few, many] = adj[action] ?? adj.zadrzi
+  if (n % 10 === 1 && n % 100 !== 11) return `${n} ${one} termin je potrošio`
+  if (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14)) return `${n} ${few} termina su potrošila`
+  return `${n} ${many} termina je potrošilo`
+}
+
 // Search terms are grouped per proposed action, so one approval covers one negative list.
 function termFindings(terms: Candidate[], classes: { term: string; kind: string; action: string; why: string }[]): Finding[] {
   const byTerm = new Map(classes.map((c) => [c.term.toLowerCase(), c]))
@@ -309,15 +377,15 @@ function termFindings(terms: Candidate[], classes: { term: string; kind: string;
     zadrzi: ['info', 'relevantnih termina', 'Ne isključivati; proveriti ponudu, landing stranu i cenu za ove upite.'],
   }
   for (const [action, g] of Object.entries(groups)) {
-    const [severity, what, proposal] = label[action] ?? label.zadrzi
+    const [severity, , proposal] = label[action] ?? label.zadrzi
     g.items.sort((a, b) => Number(b.spend) - Number(a.spend))
-    const top = g.items.slice(0, 4).map((i) => `${i.term} (${fmt1(i.spend)} EUR)`).join(', ')
+    const top = g.items.slice(0, 4).map((i) => `${i.term} (${fmt1(i.spend)} ${CUR})`).join(', ')
     out.push({
       check_type: 'search_terms',
       fingerprint: `st_group:${action}`,
       severity,
       impact_eur: Math.round(g.spend),
-      title: `${g.items.length} ${what} potrošilo je ${fmt(g.spend)} EUR za ${days} dana bez ijedne konverzije`,
+      title: `${termCount(g.items.length, action)} ${fmt(g.spend)} ${CUR} za ${days} dana bez ijedne konverzije`,
       detail: `Najveći: ${top}.${action === 'iskljuci_iz_brend_kampanja' ? ' Konkurentski upiti se prikazuju u brend kampanjama drugih brendova, što liči na široko podudaranje.' : ''}`,
       proposal,
       evidence: { action, days, terms: g.items },
@@ -328,6 +396,7 @@ function termFindings(terms: Candidate[], classes: { term: string; kind: string;
 
 async function reviewClient(clientId: string, clientName: string, params: Record<string, unknown>) {
   const runDate = today()
+  CUR = String(params.currency ?? 'EUR')
   const { data: run, error: runErr } = await sb.from('review_runs')
     .upsert({ client_id: clientId, run_date: runDate, status: 'running', started_at: new Date().toISOString(), error: null }, { onConflict: 'client_id,run_date' })
     .select('id').single()
@@ -342,15 +411,37 @@ async function reviewClient(clientId: string, clientName: string, params: Record
     const { data: cands, error } = await sb.rpc('review_candidates', { p_client_id: clientId })
     if (error) throw error
     let candidates = (cands ?? []) as Candidate[]
-    const { data: lastDay } = await sb.from('google_ads_metrics').select('report_date').eq('client_id', clientId).order('report_date', { ascending: false }).limit(1)
-    const dataDate = String(lastDay?.[0]?.report_date ?? '')
-
+    // Meta-only and Google-only clients both exist: use whichever networks the client has.
+    const latest = async (table: string) => {
+      const { data } = await sb.from(table).select('report_date').eq('client_id', clientId).order('report_date', { ascending: false }).limit(1)
+      return data?.[0]?.report_date as string | undefined
+    }
+    const days = (await Promise.all([latest('google_ads_metrics'), latest('facebook_ads_metrics')])).filter(Boolean) as string[]
+    const dataDate = days.sort().at(-1) ?? ''
     // Data freshness: if this morning's sync did not land, day-level checks would be false alarms.
-    const { data: fresh } = await sb.from('google_ads_metrics').select('created_at').eq('client_id', clientId).order('created_at', { ascending: false }).limit(1)
-    const lastLoad = fresh?.[0]?.created_at as string | undefined
-    const stale = !lastLoad || lastLoad.slice(0, 10) < runDate
+    // last_synced_at is set by every successful sync, even for an account with no spend.
+    const { data: srcs } = await sb.from('data_sources').select('last_synced_at').eq('client_id', clientId).in('provider', ['google_ads', 'facebook'])
+    const loads = (srcs ?? []).map((x) => String(x.last_synced_at ?? '')).sort()
+    const lastLoad = loads.length ? loads[0] || undefined : undefined
+    // The queue says whether today's main Google/Meta pulls actually finished for this client.
+    const { data: jobs } = await sb.from('sync_queue').select('status').eq('run_date', runDate)
+      .in('fn', ['google-ads-sync', 'facebook-ads-sync']).eq('body->>client_id', clientId)
+    const unfinished = (jobs ?? []).some((j) => j.status !== 'done')
+    const stale = !lastLoad || lastLoad.slice(0, 10) < runDate || unfinished
     if (stale) candidates = candidates.filter((c) => !['spend_anomaly', 'tracking', 'conv_drop'].includes(c.check_type))
 
+    // Accounts that normally see under one conversion a day: a day with zero is not news.
+    // A drop must also show on the day before: the last day's conversions keep arriving for days.
+    candidates = candidates.filter((c) => {
+      const e = c.evidence as Record<string, number | null>
+      if (c.check_type === 'tracking') return Number(e.baseline_conversions ?? 0) >= 1
+      if (c.check_type === 'conv_drop') {
+        const base = Number(e.baseline_conversions ?? 0)
+        return e.conversions_day_before == null || Number(e.conversions_day_before) < base * (1 - Number(params.conv_drop ?? 0.4) / 2)
+      }
+      return true
+    })
+    candidates.push(...await budgetCandidates(clientId))
     if (params.productive_project_id) {
       candidates.push(...await calendarCandidates(clientId, String(params.productive_project_id), Number(params.brief_lead_days ?? 3), runDate))
     }
@@ -371,7 +462,9 @@ async function reviewClient(clientId: string, clientName: string, params: Record
       if (c.check_type === 'pacing') c.evidence.daily_adjustment = Math.round(-Number(c.evidence.gap) / Math.max(1, Number(c.evidence.remaining_days)))
     }
 
+    // Big accounts can have hundreds of wasted terms; the biggest 80 keep one call fast and readable.
     const terms = candidates.filter((c) => c.check_type === 'search_term')
+      .sort((a, b) => Number(b.evidence.spend) - Number(a.evidence.spend)).slice(0, 80)
     const others = candidates.filter((c) => c.check_type !== 'search_term')
     let findings: Finding[] = []
     let model = ''
@@ -379,7 +472,7 @@ async function reviewClient(clientId: string, clientName: string, params: Record
       findings.push({
         check_type: 'data', fingerprint: `data_stale:${runDate}`, severity: 'hitno', impact_eur: null,
         title: 'Jutarnji sync podataka nije stigao; dnevne provere su preskočene',
-        detail: `Poslednje učitavanje Google podataka: ${lastLoad ?? 'nepoznato'}. Bez svežih podataka provere troška i konverzija bi davale lažne alarme.`,
+        detail: `Najstariji poslednji sync (Google/Meta nalozi): ${lastLoad ?? 'nepoznato'}. Bez svežih podataka provere troška i konverzija bi davale lažne alarme.`,
         proposal: 'Proveriti sync u Brain-u (sync_queue) i ponovo pokrenuti pregled kad podaci stignu.',
         evidence: { last_load: lastLoad ?? null },
       })

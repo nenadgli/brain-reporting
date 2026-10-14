@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { downloadText } from '../lib/creatives'
 
-type ClientOpt = { client_id: string; clients: { name: string } | null }
+type Params = Record<string, unknown> & { currency?: string }
+type ClientOpt = { client_id: string; params: Params; clients: { name: string } | null }
 type Run = {
   id: string
   run_date: string
@@ -48,6 +49,8 @@ const CHECK_LABEL: Record<string, string> = {
   brief_prep: 'Akcija uskoro',
   brief_ended: 'Akcija završena',
   data: 'Podaci',
+  meta_cap: 'Meta limit naloga',
+  campaign_budgets: 'Mesečni budžeti',
 }
 const STATUS_LABEL: Record<Status, string> = {
   novo: 'Čeka odluku', odobreno: 'Odobreno', odbijeno: 'Odbijeno', odlozeno: 'Odloženo', izvrseno: 'Urađeno', isteklo: 'Isteklo',
@@ -56,14 +59,14 @@ const STATUS_LABEL: Record<Status, string> = {
 const fmtInt = (n: number) => n.toLocaleString('sr-RS', { maximumFractionDigits: 0 })
 const shortDate = (d: string) => `${Number(d.slice(8, 10))}.${Number(d.slice(5, 7))}.`
 
-function Evidence({ f }: { f: Finding }) {
+function Evidence({ f, cur }: { f: Finding; cur: string }) {
   const e = f.evidence
   if (f.check_type === 'search_terms') {
     const terms = (e.terms as Term[]) ?? []
     return (
       <table className="mt-2 w-full text-xs">
         <thead className="text-left text-[var(--color-ink-soft)]">
-          <tr><th className="py-1 pr-3">Termin</th><th className="pr-3 text-right">Trošak (EUR)</th><th className="pr-3 text-right">Klikovi</th><th className="pr-3 text-right">Kampanja</th><th>Zašto</th></tr>
+          <tr><th className="py-1 pr-3">Termin</th><th className="pr-3 text-right">Trošak ({cur})</th><th className="pr-3 text-right">Klikovi</th><th className="pr-3 text-right">Kampanja</th><th>Zašto</th></tr>
         </thead>
         <tbody>
           {terms.map((t) => (
@@ -84,7 +87,7 @@ function Evidence({ f }: { f: Finding }) {
     return (
       <table className="mt-2 w-full text-xs">
         <thead className="text-left text-[var(--color-ink-soft)]">
-          <tr><th className="py-1 pr-3">Kampanja</th><th className="pr-3 text-right">Uobičajeno (EUR)</th><th className="pr-3">Poslednji trošak</th><th>Flight u planu</th></tr>
+          <tr><th className="py-1 pr-3">Kampanja</th><th className="pr-3 text-right">Uobičajeno ({cur})</th><th className="pr-3">Poslednji trošak</th><th>Flight u planu</th></tr>
         </thead>
         <tbody>
           {items.map((i) => (
@@ -96,6 +99,29 @@ function Evidence({ f }: { f: Finding }) {
                 {[...((i.planned_flights_that_day as string[]) ?? []).map((l) => `traje: ${l}`),
                   ...((i.flights_ended_last_3_days as { label: string; end: string }[]) ?? []).map((l) => `završen ${shortDate(l.end)}: ${l.label}`)].join('; ') || '—'}
               </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )
+  }
+  if (f.check_type === 'campaign_budgets') {
+    const items = (e.items as Record<string, unknown>[]) ?? []
+    const label: Record<string, string> = { prekoraceno: 'prekoračeno', prebrzo: 'prebrzo', presporo: 'presporo' }
+    return (
+      <table className="mt-2 w-full text-xs">
+        <thead className="text-left text-[var(--color-ink-soft)]">
+          <tr><th className="py-1 pr-3">Kampanja</th><th className="pr-3 text-right">Budžet ({cur})</th><th className="pr-3 text-right">Potrošeno</th><th className="pr-3 text-right">Projekcija</th><th className="pr-3 text-right">Predlog dnevnog</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          {items.map((i) => (
+            <tr key={`${i.network}|${i.campaign}`} className="border-t border-[var(--color-line)]">
+              <td className="py-1 pr-3">{String(i.network)} · {String(i.campaign)}</td>
+              <td className="pr-3 text-right">{fmtInt(Number(i.monthly_budget))}</td>
+              <td className="pr-3 text-right">{fmtInt(Number(i.spent_mtd))}</td>
+              <td className="pr-3 text-right">{fmtInt(Number(i.projected_month))}</td>
+              <td className="pr-3 text-right">{i.recommended_daily == null ? '—' : Number(i.recommended_daily).toLocaleString('sr-RS', { maximumFractionDigits: 2 })}</td>
+              <td>{label[String(i.status)] ?? String(i.status)}</td>
             </tr>
           ))}
         </tbody>
@@ -125,6 +151,89 @@ function Evidence({ f }: { f: Finding }) {
   )
 }
 
+const LIST_FIELDS: [string, string, string][] = [
+  ['protected_terms', 'Zaštićeni termini', 'brend klijenta; nikad se ne predlažu za isključivanje'],
+  ['brands_sold', 'Brendovi koje klijent prodaje', 'termini sa ovim brendovima su relevantni'],
+  ['competitors', 'Konkurenti', 'druge prodavnice i brendovi koje klijent ne prodaje'],
+  ['exclude_campaign_patterns', 'Kampanje koje se ne gledaju (regex)', 'npr. ^Social_ za kampanje social tima'],
+]
+const NUM_FIELDS: [string, string][] = [
+  ['pacing_tolerance', 'Dozvoljeno odstupanje od plana (0.15 = 15%)'],
+  ['spend_anomaly', 'Prag promene troška kampanje (0.5 = 50%)'],
+  ['spend_anomaly_min_eur', 'Najmanji dnevni trošak kampanje za alarm'],
+  ['tracking_min_spend_eur', 'Najmanji dnevni trošak za proveru trackinga'],
+  ['conv_drop', 'Pad konverzija za alarm (0.4 = 40%)'],
+  ['conv_drop_min_baseline', 'Najmanje uobičajenih konverzija dnevno'],
+  ['waste_min_spend_eur', 'Search termin bez konverzije: najmanji trošak'],
+  ['waste_days', 'Search termini: broj dana'],
+  ['max_findings', 'Najviše nalaza dnevno'],
+  ['cooldown_days', 'Odlučene stavke ne vraćati (dana)'],
+]
+
+function SettingsPanel({ client, onSaved }: { client: ClientOpt; onSaved: (p: Params) => void }) {
+  const [draft, setDraft] = useState<Record<string, string>>({})
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState('')
+  useEffect(() => {
+    const p = client.params ?? {}
+    const d: Record<string, string> = { currency: String(p.currency ?? 'EUR'), productive_project_id: String(p.productive_project_id ?? '') }
+    for (const [k] of LIST_FIELDS) d[k] = ((p[k] as string[]) ?? []).join('\n')
+    for (const [k] of NUM_FIELDS) d[k] = p[k] == null ? '' : String(p[k])
+    setDraft(d)
+    setMsg('')
+  }, [client])
+
+  async function save() {
+    const p: Params = { ...client.params, currency: draft.currency.trim().toUpperCase() || 'EUR' }
+    if (draft.productive_project_id.trim()) p.productive_project_id = draft.productive_project_id.trim()
+    else delete p.productive_project_id
+    for (const [k] of LIST_FIELDS) p[k] = draft[k].split('\n').map((x) => x.trim()).filter(Boolean).map((x) => (k === 'exclude_campaign_patterns' ? x : x.toLowerCase()))
+    for (const [k, label] of NUM_FIELDS) {
+      const n = Number(draft[k].replace(',', '.'))
+      if (!Number.isFinite(n) || draft[k].trim() === '') { setMsg(`Neispravan broj: ${label}`); return }
+      p[k] = n
+    }
+    for (const r of (p.exclude_campaign_patterns as string[])) {
+      try { new RegExp(r) } catch { setMsg(`Neispravan regex: ${r}`); return }
+    }
+    setSaving(true)
+    const { error } = await supabase.from('review_settings').update({ params: p, updated_at: new Date().toISOString() }).eq('client_id', client.client_id)
+    setSaving(false)
+    if (error) { setMsg(error.message); return }
+    setMsg('Sačuvano. Važi od sledećeg pregleda.')
+    onSaved(p)
+  }
+
+  const cls = 'w-full rounded border border-[var(--color-line)] bg-white px-3 py-1.5 text-sm'
+  return (
+    <section className="mb-8 rounded border border-[var(--color-line)] bg-white p-5 text-sm">
+      <div className="grid gap-4 md:grid-cols-2">
+        {LIST_FIELDS.map(([k, label, hint]) => (
+          <label key={k}>
+            <span className="mb-1 block font-medium">{label}</span>
+            <span className="mb-1 block text-xs text-[var(--color-ink-soft)]">{hint}; jedan po redu</span>
+            <textarea rows={5} className={cls} value={draft[k] ?? ''} onChange={(e) => setDraft({ ...draft, [k]: e.target.value })} />
+          </label>
+        ))}
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-4">
+        <label><span className="mb-1 block text-xs text-[var(--color-ink-soft)]">Valuta naloga</span>
+          <input className={cls} value={draft.currency ?? ''} onChange={(e) => setDraft({ ...draft, currency: e.target.value })} /></label>
+        <label><span className="mb-1 block text-xs text-[var(--color-ink-soft)]">Productive projekat (ID, za kalendar akcija)</span>
+          <input className={cls} value={draft.productive_project_id ?? ''} onChange={(e) => setDraft({ ...draft, productive_project_id: e.target.value })} /></label>
+        {NUM_FIELDS.map(([k, label]) => (
+          <label key={k}><span className="mb-1 block text-xs text-[var(--color-ink-soft)]">{label}</span>
+            <input className={cls} value={draft[k] ?? ''} onChange={(e) => setDraft({ ...draft, [k]: e.target.value })} /></label>
+        ))}
+      </div>
+      <div className="mt-4 flex items-center gap-3">
+        <button onClick={save} disabled={saving} className="rounded bg-[var(--color-indigo)] px-4 py-1.5 font-medium text-white disabled:opacity-40">{saving ? 'Čuvam…' : 'Sačuvaj podešavanja'}</button>
+        {msg && <span className="text-xs text-[var(--color-ink-soft)]">{msg}</span>}
+      </div>
+    </section>
+  )
+}
+
 export default function MorningReview() {
   const [clients, setClients] = useState<ClientOpt[]>([])
   const [clientId, setClientId] = useState('')
@@ -136,14 +245,29 @@ export default function MorningReview() {
   const [rerunning, setRerunning] = useState(false)
   const [notes, setNotes] = useState<TeamNotes>({})
   const [message, setMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const [overview, setOverview] = useState<Record<string, { open: number; urgent: number }>>({})
+  const [showSettings, setShowSettings] = useState(false)
 
   useEffect(() => {
-    supabase.from('review_settings').select('client_id, clients(name)').eq('enabled', true).then(({ data }) => {
-      const list = (data ?? []) as unknown as ClientOpt[]
+    supabase.from('review_settings').select('client_id, params, clients(name)').eq('enabled', true).then(({ data }) => {
+      const list = ((data ?? []) as unknown as ClientOpt[]).sort((a, b) => (a.clients?.name ?? '').localeCompare(b.clients?.name ?? ''))
       setClients(list)
       if (list.length) setClientId(list[0].client_id)
     })
   }, [])
+
+  // Today's open findings across all clients, so the team lead sees where to start.
+  useEffect(() => {
+    supabase.from('review_findings').select('client_id, severity').eq('status', 'novo').eq('run_date', new Date().toISOString().slice(0, 10)).then(({ data }) => {
+      const m: Record<string, { open: number; urgent: number }> = {}
+      for (const r of data ?? []) {
+        const o = (m[r.client_id] ??= { open: 0, urgent: 0 })
+        o.open++
+        if (r.severity === 'hitno' || r.severity === 'visoko') o.urgent++
+      }
+      setOverview(m)
+    })
+  }, [findings])
 
   async function loadRuns(selectLatest = true) {
     if (!clientId) return
@@ -215,6 +339,8 @@ export default function MorningReview() {
     downloadText(`negativne_${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}_${run?.run_date ?? ''}.csv`, lines.join('\r\n') + '\r\n')
   }
 
+  const client = clients.find((c) => c.client_id === clientId)
+  const cur = String(client?.params?.currency ?? 'EUR')
   const open = findings.filter((f) => f.status === 'novo')
   const bySeverity = (s: Finding['severity']) => findings.filter((f) => f.severity === s).length
   const impact = findings.reduce((n, f) => n + (f.impact_eur ?? 0), 0)
@@ -250,6 +376,29 @@ export default function MorningReview() {
         </div>
       </header>
 
+      {clients.length > 1 && (
+        <section className="mb-6 flex flex-wrap gap-2 text-xs">
+          {clients.map((c) => {
+            const o = overview[c.client_id]
+            return (
+              <button key={c.client_id} onClick={() => setClientId(c.client_id)}
+                className={`rounded border px-3 py-1 ${c.client_id === clientId ? 'border-[var(--color-indigo)] bg-[var(--color-indigo-soft)]' : 'border-[var(--color-line)] bg-white'}`}>
+                {c.clients?.name}
+                {o ? <span className={o.urgent ? 'ml-1 font-medium text-[var(--color-rust)]' : 'ml-1 text-[var(--color-ink-soft)]'}>{o.open}{o.urgent ? ` (${o.urgent} važno)` : ''}</span> : <span className="ml-1 text-[var(--color-ink-soft)]">0</span>}
+              </button>
+            )
+          })}
+        </section>
+      )}
+      <p className="mb-6 text-xs">
+        <button onClick={() => setShowSettings(!showSettings)} className="text-[var(--color-indigo-dark)] underline">
+          {showSettings ? 'Sakrij podešavanja klijenta' : 'Podešavanja klijenta (brend, konkurenti, pragovi, valuta)'}
+        </button>
+      </p>
+      {showSettings && client && (
+        <SettingsPanel client={client} onSaved={(p) => setClients(clients.map((c) => (c.client_id === client.client_id ? { ...c, params: p } : c)))} />
+      )}
+
       {message && (
         <p className={`mb-6 rounded px-4 py-2 text-sm ${message.kind === 'ok' ? 'bg-[var(--color-indigo-soft)] text-[var(--color-indigo-dark)]' : 'bg-red-50 text-[var(--color-rust)]'}`}>{message.text}</p>
       )}
@@ -261,7 +410,7 @@ export default function MorningReview() {
             {[
               ['Čeka odluku', String(open.length)],
               ['Hitno / visoko', `${bySeverity('hitno')} / ${bySeverity('visoko')}`],
-              ['Procena u igri', `${fmtInt(impact)} EUR`],
+              ['Procena u igri', `${fmtInt(impact)} ${cur}`],
               ['Podaci zaključno sa', run.data_date ? shortDate(run.data_date) : '—'],
               ['Kandidata / prikazano', `${run.candidates ?? 0} / ${run.findings ?? 0}`],
             ].map(([k, v]) => (
@@ -282,7 +431,7 @@ export default function MorningReview() {
                     <p className="mb-1 flex flex-wrap items-center gap-2 text-xs">
                       <span className={`rounded px-2 py-0.5 font-medium ${SEVERITY[f.severity].cls}`}>{SEVERITY[f.severity].label}</span>
                       <span className="text-[var(--color-ink-soft)]">{CHECK_LABEL[f.check_type] ?? f.check_type}</span>
-                      {f.impact_eur != null && <span className="text-[var(--color-ink-soft)]">· {fmtInt(f.impact_eur)} EUR</span>}
+                      {f.impact_eur != null && <span className="text-[var(--color-ink-soft)]">· {fmtInt(f.impact_eur)} {cur}</span>}
                     </p>
                     <h3 className="text-base font-medium">{f.title}</h3>
                     {f.detail && <p className="mt-1 text-sm text-[var(--color-ink-soft)]">{f.detail}</p>}
@@ -316,7 +465,7 @@ export default function MorningReview() {
                 )}
                 <details className="mt-3">
                   <summary className="cursor-pointer text-xs text-[var(--color-ink-soft)]">Brojevi na koje se nalaz oslanja</summary>
-                  <Evidence f={f} />
+                  <Evidence f={f} cur={cur} />
                 </details>
               </article>
             ))}

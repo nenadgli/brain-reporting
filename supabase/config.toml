@@ -57,3 +57,6 @@ verify_jwt = true
 
 [functions.windsor-sync]
 verify_jwt = true
+
+[functions.account-settings-sync]
+verify_jwt = true

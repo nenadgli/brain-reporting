@@ -26,8 +26,10 @@ Keys shared between functions live in database tables with RLS and no policies (
 Brain `integration_secrets` (`feedhub_briefs_key`, `review_cron_key`), Feed Hub `external_api_keys` (hash of the Brain key)
 and `internal_secrets` (`productive_file_signing_key`).
 
-Scheduling is done with pg_cron in the Brain database: `daily-windsor-sync` (04:00 UTC, fills `sync_queue`),
-`dispatch-sync-queue` (every minute, 15 jobs at a time) and `morning-review` (05:00 UTC).
+Scheduling is done with pg_cron in the Brain database: `daily-windsor-sync` (04:00 UTC, fills `sync_queue`,
+including `account-settings-sync` for budgets, bidding targets and Meta spend caps),
+`dispatch-sync-queue` (every minute, 15 jobs at a time) and `morning-review` (05:00 UTC, queues one
+review per client in `review_settings`; the dispatcher adds the internal key for those jobs).
 `daily-sync` is kept for manual runs only; called for all clients at once it hits Supabase's per-trace rate limit.
 
 ## Database migrations
