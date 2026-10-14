@@ -84,3 +84,6 @@ verify_jwt = true
 
 [functions.feed-sync]
 verify_jwt = true
+
+[functions.product-sync]
+verify_jwt = true

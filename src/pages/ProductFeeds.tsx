@@ -8,6 +8,17 @@ type Feed = { id: string; market: string; url: string; interval_hours: number; e
 type Snapshot = { id: number; checked_at: string; status: string; items: number | null; on_sale: number | null; avg_discount_pct: number | null; new_items: number | null; removed_items: number | null; back_items: number | null; price_changes: number | null; sale_changes: number | null; other_changes: number | null; error: string | null }
 type Change = { id: number; item_id: string; changed_at: string; kind: string; old_value: string | null; new_value: string | null }
 type Item = { item_id: string; title: string | null; price: number | null; sale_price: number | null; link: string | null; removed_at: string | null }
+type Perf = {
+  item_id: string; title: string | null; category: string | null; link: string | null; price: number | null; sale_price: number | null; in_feed: boolean
+  views: number; add_to_cart: number; purchases: number; revenue: number; impressions: number; clicks: number; spend: number; conversions: number; conversion_value: number
+  last_change_kind: string | null; last_change_at: string | null; last_change_old: string | null; last_change_new: string | null
+}
+// Signals worth a look; thresholds are deliberately simple and shown on screen.
+const FLAGS: { key: string; label: string; test: (p: Perf) => boolean }[] = [
+  { key: 'bez_prodaje', label: 'troši bez prodaje (≥ 30, 0 kupovina)', test: (p) => p.spend >= 30 && p.purchases === 0 },
+  { key: 'bez_oglasa', label: 'prodaje se, a skoro bez oglasa (≥ 3 kupovine, < 5 troška)', test: (p) => p.purchases >= 3 && p.spend < 5 },
+  { key: 'nema_stanja', label: 'nema na stanju, a trošio je', test: (p) => !p.in_feed && p.spend > 0 },
+]
 
 const KIND: Record<string, { label: string; cls: string }> = {
   new: { label: 'nov', cls: 'bg-[var(--color-indigo-soft)] text-[var(--color-indigo-dark)]' },
@@ -34,6 +45,11 @@ export default function ProductFeeds() {
   const [kind, setKind] = useState('')
   const [q, setQ] = useState('')
   const [error, setError] = useState('')
+  const [tab, setTab] = useState<'perf' | 'changes'>('perf')
+  const [days, setDays] = useState(30)
+  const [perf, setPerf] = useState<Perf[]>([])
+  const [flag, setFlag] = useState('')
+  const [sort, setSort] = useState<keyof Perf>('spend')
 
   useEffect(() => {
     supabase.from('product_feeds').select('id, market, url, interval_hours, enabled, last_checked_at, last_status, last_error, clients(name)').eq('enabled', true).order('created_at')
@@ -67,6 +83,24 @@ export default function ProductFeeds() {
       setItems(m)
     })
   }, [feedId, kind])
+
+  useEffect(() => {
+    if (!feedId) return
+    const to = new Date(Date.now() - 864e5).toISOString().slice(0, 10)
+    const from = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10)
+    supabase.rpc('product_performance', { p_feed_id: feedId, p_from: from, p_to: to }).then(({ data, error: e }) => {
+      if (e) { setError(e.message); return }
+      setPerf(((data ?? []) as Perf[]).map((p) => ({ ...p, views: +p.views, add_to_cart: +p.add_to_cart, purchases: +p.purchases, revenue: +p.revenue, impressions: +p.impressions, clicks: +p.clicks, spend: +p.spend, conversions: +p.conversions, conversion_value: +p.conversion_value })))
+    })
+  }, [feedId, days])
+
+  const perfShown = useMemo(() => {
+    const t = q.trim().toLowerCase()
+    const f = FLAGS.find((x) => x.key === flag)
+    return perf.filter((p) => (!f || f.test(p)) && (!t || p.item_id.toLowerCase().includes(t) || (p.title ?? '').toLowerCase().includes(t)))
+      .sort((a, b) => Number(b[sort] ?? 0) - Number(a[sort] ?? 0)).slice(0, 300)
+  }, [perf, flag, q, sort])
+  const totals = useMemo(() => perf.reduce((t, p) => ({ spend: t.spend + p.spend, revenue: t.revenue + p.revenue, purchases: t.purchases + p.purchases, value: t.value + p.conversion_value }), { spend: 0, revenue: 0, purchases: 0, value: 0 }), [perf])
 
   const feed = feeds.find((f) => f.id === feedId)
   const last = snaps.find((s) => s.status !== 'greska' && s.items != null)
@@ -113,6 +147,68 @@ export default function ProductFeeds() {
           </section>
           {feed.last_error && <p className="mb-6 rounded bg-red-50 px-4 py-2 text-sm text-[var(--color-rust)]">Poslednja provera: {feed.last_error}</p>}
 
+
+          <div className="mb-4 flex overflow-hidden rounded border border-[var(--color-line)] text-sm" style={{ width: 'fit-content' }}>
+            {([['perf', 'Učinak po proizvodu'], ['changes', 'Promene u feedu']] as const).map(([k, l]) => (
+              <button key={k} onClick={() => setTab(k)} className={`px-4 py-1.5 ${tab === k ? 'bg-[var(--color-indigo)] text-white' : 'bg-white'}`}>{l}</button>
+            ))}
+          </div>
+
+          {tab === 'perf' && (
+          <section className="mb-10">
+            <div className="mb-3 flex flex-wrap items-center gap-3">
+              <select value={days} onChange={(e) => setDays(Number(e.target.value))} className={inputCls}>
+                {[7, 14, 30].map((d) => <option key={d} value={d}>poslednjih {d} dana</option>)}
+              </select>
+              <select value={flag} onChange={(e) => setFlag(e.target.value)} className={inputCls}>
+                <option value="">svi proizvodi</option>
+                {FLAGS.map((f) => <option key={f.key} value={f.key}>{f.label} ({perf.filter(f.test).length})</option>)}
+              </select>
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ID ili naziv proizvoda" className={`${inputCls} w-56`} />
+              <span className="text-xs text-[var(--color-ink-soft)]">Google Ads trošak {n0(totals.spend)} · GA4 prihod {n0(totals.revenue)} · kupovina {n0(totals.purchases)}</span>
+            </div>
+            <p className="mb-2 text-xs text-[var(--color-ink-soft)]">GA4: pregledi, korpa, kupovine i prihod za tržište feeda. Google Ads: Shopping i PMax po proizvodu. Klik na naslov kolone sortira.</p>
+            <div className="overflow-x-auto rounded border border-[var(--color-line)] bg-white">
+              <table className="w-full text-xs">
+                <thead className="bg-[var(--color-paper)] text-left text-[var(--color-ink-soft)]">
+                  <tr>
+                    <th className="px-3 py-2">Proizvod</th><th className="px-2 text-right">Cena</th>
+                    {([['views', 'Pregledi'], ['add_to_cart', 'Korpa'], ['purchases', 'Kupovine'], ['revenue', 'Prihod GA4'], ['clicks', 'Klikovi'], ['spend', 'Trošak'], ['conversion_value', 'Vrednost Ads']] as [keyof Perf, string][]).map(([k, l]) => (
+                      <th key={k} className="cursor-pointer px-2 text-right" onClick={() => setSort(k)}>{l}{sort === k ? ' ↓' : ''}</th>
+                    ))}
+                    <th className="px-2 text-right">ROAS Ads</th><th className="px-2">Poslednja promena u feedu</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {perfShown.map((p) => (
+                    <tr key={p.item_id} className="border-t border-[var(--color-line)]">
+                      <td className="px-3 py-1.5">
+                        {p.link ? <a href={p.link} target="_blank" rel="noreferrer" className="underline decoration-[var(--color-line)]">{p.title ?? p.item_id}</a> : (p.title ?? p.item_id)}
+                        <span className="ml-1 text-[var(--color-ink-soft)]">{p.item_id}</span>
+                        {!p.in_feed && <span className="ml-1 rounded bg-red-50 px-1 text-[var(--color-rust)]">nema na stanju</span>}
+                        {FLAGS.filter((f) => f.key !== 'nema_stanja' && f.test(p)).map((f) => <span key={f.key} className="ml-1 rounded bg-amber-50 px-1 text-amber-800">{f.key === 'bez_prodaje' ? 'troši bez prodaje' : 'bez oglasa'}</span>)}
+                      </td>
+                      <td className="px-2 text-right whitespace-nowrap">{p.sale_price != null ? <><s className="text-[var(--color-ink-soft)]">{n0(p.price)}</s> {n0(p.sale_price)}</> : n0(p.price)}</td>
+                      <td className="px-2 text-right">{n0(p.views)}</td>
+                      <td className="px-2 text-right">{n0(p.add_to_cart)}</td>
+                      <td className="px-2 text-right">{n0(p.purchases)}</td>
+                      <td className="px-2 text-right">{n0(p.revenue)}</td>
+                      <td className="px-2 text-right">{n0(p.clicks)}</td>
+                      <td className="px-2 text-right">{n0(p.spend)}</td>
+                      <td className="px-2 text-right">{n0(p.conversion_value)}</td>
+                      <td className="px-2 text-right">{p.spend > 0 ? (p.conversion_value / p.spend).toFixed(1) : '—'}</td>
+                      <td className="px-2 whitespace-nowrap">{p.last_change_kind ? <><span className={`rounded px-1 ${KIND[p.last_change_kind]?.cls ?? ''}`}>{KIND[p.last_change_kind]?.label ?? p.last_change_kind}</span> {p.last_change_at ? when(p.last_change_at) : ''}</> : ''}</td>
+                    </tr>
+                  ))}
+                  {!perfShown.length && <tr><td colSpan={11} className="px-3 py-4 text-sm text-[var(--color-ink-soft)]">Nema podataka za ovaj izbor.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            {perf.length > 300 && <p className="mt-2 text-xs text-[var(--color-ink-soft)]">Prikazano prvih 300 od {perf.length}; suzi filterom ili pretragom.</p>}
+          </section>
+          )}
+
+          {tab === 'changes' && <>
           <section className="mb-10 overflow-x-auto rounded border border-[var(--color-line)] bg-white">
             <table className="w-full text-xs">
               <thead className="bg-[var(--color-paper)] text-left text-[var(--color-ink-soft)]">
@@ -132,7 +228,6 @@ export default function ProductFeeds() {
               </tbody>
             </table>
           </section>
-
           <section>
             <div className="mb-3 flex flex-wrap items-center gap-3">
               <h2 className="font-display text-xl font-medium">Promene po proizvodu</h2>
@@ -169,6 +264,7 @@ export default function ProductFeeds() {
               </table>
             </div>
           </section>
+          </>}
         </>
       )}
     </div>
