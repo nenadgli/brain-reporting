@@ -19,9 +19,10 @@ import MorningReview from './pages/MorningReview'
 import Budgets from './pages/Budgets'
 import TaskBoard from './pages/TaskBoard'
 import WorkLog from './pages/WorkLog'
+import ProductFeeds from './pages/ProductFeeds'
 import './index.css'
 
-type View = 'summary' | 'client' | 'agency' | 'google_ads' | 'facebook_ads' | 'blended' | 'ga4' | 'owned' | 'chat' | 'ppc' | 'pacing' | 'campaigns' | 'proposal' | 'review' | 'budgets' | 'tasks' | 'done'
+type View = 'summary' | 'client' | 'agency' | 'google_ads' | 'facebook_ads' | 'blended' | 'ga4' | 'owned' | 'chat' | 'ppc' | 'pacing' | 'campaigns' | 'proposal' | 'review' | 'budgets' | 'tasks' | 'done' | 'products'
 
 function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined)
@@ -52,6 +53,7 @@ function App() {
     { key: 'budgets', label: 'Budžeti' },
     { key: 'proposal', label: 'Predlog plana' },
     { key: 'campaigns', label: 'Nove kampanje' },
+    { key: 'products', label: 'Proizvodi' },
     { key: 'done', label: 'Urađeno' },
   ]
 
@@ -107,6 +109,7 @@ function App() {
         {view === 'budgets' && <Budgets />}
         {view === 'tasks' && <TaskBoard onOpen={setView} />}
         {view === 'done' && <WorkLog />}
+        {view === 'products' && <ProductFeeds />}
         {view === 'proposal' && <PlanProposal />}
         {view === 'campaigns' && <CampaignBuilder />}
       </div>

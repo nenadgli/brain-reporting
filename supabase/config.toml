@@ -81,3 +81,6 @@ verify_jwt = true
 
 [functions.rsa-refresh]
 verify_jwt = true
+
+[functions.feed-sync]
+verify_jwt = true
