@@ -11,11 +11,12 @@ const CORS = {
 }
 const json = (obj: unknown, status: number) => new Response(JSON.stringify(obj), { status, headers: { ...CORS, 'Content-Type': 'application/json' } })
 
-// NOTE: column names follow plan v3. Verify against a real Google Ads Editor export
-// (names differ by Editor version/language) before first production use.
+// Column names and values as in Google Ads Editor's export of the F&F BA account (2026-10-14).
+// Image assets are not part of Editor's CSV (ads have no image columns); they travel in the
+// images/ folder of the package and are added in Editor by hand.
 const HEADLINES = Array.from({ length: 15 }, (_, i) => `Headline ${i + 1}`)
 const DESCRIPTIONS = Array.from({ length: 4 }, (_, i) => `Description ${i + 1}`)
-const HEADER = ['Campaign', 'Campaign Type', 'Budget', 'Ad group', 'Ad type', ...HEADLINES, ...DESCRIPTIONS, 'Final URL', 'Path 1', 'Path 2', 'Keyword', 'Criterion Type', 'Image', 'Status']
+const HEADER = ['Campaign', 'Campaign Type', 'Budget', 'Budget type', 'Ad Group', 'Ad type', ...HEADLINES, ...DESCRIPTIONS, 'Final URL', 'Path 1', 'Path 2', 'Keyword', 'Criterion Type', 'Campaign Status', 'Ad Group Status', 'Status']
 const KIND_ORDER = ['campaign', 'ad_group', 'rsa', 'keyword', 'negative_keyword']
 
 function esc(v: unknown): string {
@@ -25,26 +26,23 @@ function esc(v: unknown): string {
 
 function rowsFor(d: Record<string, any>): Record<string, unknown>[] {
   const p = d.payload ?? {}
-  const base: Record<string, unknown> = { Campaign: d.campaign_name, 'Ad group': d.ad_group_name ?? '', Status: 'Paused' }
+  const base: Record<string, unknown> = { Campaign: d.campaign_name, 'Ad Group': d.ad_group_name ?? '' }
   switch (d.kind) {
     case 'campaign':
-      return [{ ...base, 'Ad group': '', 'Campaign Type': p.campaign_type ?? 'Search', Budget: p.daily_budget ?? '' }]
-    case 'ad_group': {
-      // Image assets: Editor reads the file from a path relative to the CSV (the images/ folder of the ZIP package).
-      const images = (p.images ?? []).filter((img: { file?: string }) => img?.file && !/[\\/]/.test(img.file))
-      return [base, ...images.map((img: { file: string }) => ({ Campaign: d.campaign_name, 'Ad group': d.ad_group_name ?? '', Image: `images/${img.file}` }))]
-    }
+      return [{ Campaign: d.campaign_name, 'Campaign Type': p.campaign_type ?? 'Search', Budget: p.daily_budget ?? '', 'Budget type': 'Daily', 'Campaign Status': 'Paused' }]
+    case 'ad_group':
+      return [{ ...base, 'Ad Group Status': 'Paused' }]
     case 'rsa': {
-      const r: Record<string, unknown> = { ...base, 'Ad type': 'Responsive search ad', 'Final URL': p.final_url, 'Path 1': p.path1, 'Path 2': p.path2 }
+      const r: Record<string, unknown> = { ...base, 'Ad type': 'Responsive search ad', 'Final URL': p.final_url, 'Path 1': p.path1, 'Path 2': p.path2, Status: 'Paused' }
       ;(p.headlines ?? []).slice(0, 15).forEach((h: string, i: number) => { r[HEADLINES[i]] = h })
       ;(p.descriptions ?? []).slice(0, 4).forEach((x: string, i: number) => { r[DESCRIPTIONS[i]] = x })
       return [r]
     }
     case 'keyword':
-      return [{ ...base, Keyword: p.keyword, 'Criterion Type': p.match_type ?? 'Phrase' }]
+      return [{ ...base, Keyword: p.keyword, 'Criterion Type': p.match_type ?? 'Phrase', Status: 'Enabled' }]
     case 'negative_keyword':
-      // campaign-level negative: no ad group
-      return [{ ...base, 'Ad group': '', Keyword: p.keyword, 'Criterion Type': 'Negative ' + (p.match_type ?? 'Phrase') }]
+      // Campaign-level negative: no ad group, "Campaign Negative <match>" as in Editor's export.
+      return [{ Campaign: d.campaign_name, Keyword: p.keyword, 'Criterion Type': 'Campaign Negative ' + (p.match_type ?? 'Phrase'), Status: 'Enabled' }]
     default:
       return []
   }

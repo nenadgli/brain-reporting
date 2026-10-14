@@ -68,6 +68,8 @@ export default function DemandGenAdGroupForm({ client, market, brief, images, on
   const [descriptions, setDescriptions] = useState('')
   const [businessName, setBusinessName] = useState('')
   const [cta, setCta] = useState('Shop now')
+  // Editor sets a Demand Gen ad group's audience by its name ("DMG - Audience"); the client default fills it.
+  const [audienceName, setAudienceName] = useState('')
   const [videos, setVideos] = useState('')
   const [rationale, setRationale] = useState('')
   const [drafting, setDrafting] = useState(false)
@@ -87,6 +89,12 @@ export default function DemandGenAdGroupForm({ client, market, brief, images, on
   useEffect(() => {
     setCopyFrom(campaigns.find((c) => c.campaign === campaign)?.ad_groups[0] ?? '')
   }, [campaign, campaigns])
+
+  useEffect(() => {
+    setAudienceName('')
+    supabase.from('client_editor_defaults').select('dg_audience_name').eq('client_id', client.id).maybeSingle()
+      .then(({ data }) => setAudienceName(data?.dg_audience_name ?? ''))
+  }, [client.id])
 
   useEffect(() => {
     if (!brief) return
@@ -156,6 +164,7 @@ export default function DemandGenAdGroupForm({ client, market, brief, images, on
   if (!count('SQUARE_MARKETING_IMAGE')) warnings.push('Nema kvadratne slike 1:1.')
   if (!count('PORTRAIT_MARKETING_IMAGE')) warnings.push('Nema vertikalne slike 4:5 (preporučeno za YouTube Shorts i Discover).')
   if (hl.length < 5) warnings.push('Google preporučuje 5 naslova.')
+  if (!audienceName.trim()) warnings.push('Nema publike ad grupe; bez nje Demand Gen cilja široko (optimized targeting).')
   if (groupName && campaigns.find((c) => c.campaign === campaign)?.ad_groups.includes(groupName.trim())) warnings.push('Ad grupa sa tim imenom već postoji u kampanji.')
 
   async function save() {
@@ -166,6 +175,7 @@ export default function DemandGenAdGroupForm({ client, market, brief, images, on
       campaign_name: campaign,
       ad_group_name: groupName.trim(),
       copy_settings_from: copyFrom || null,
+      audience_name: audienceName.trim() || null,
       final_url: finalUrl.trim(),
       headlines: hl,
       long_headlines: vids.length ? lh : [],
@@ -206,7 +216,7 @@ export default function DemandGenAdGroupForm({ client, market, brief, images, on
     const res = await downloadEditorPackage(`editor_dg_${slug}_${label}`, data, list.flatMap((d) => d.images ?? []))
     setBusy(false)
     const copy = list.find((d) => d.copy_settings_from)?.copy_settings_from
-    onMessage({ kind: res.ok ? 'ok' : 'err', text: res.text + (copy ? ` Publiku, lokacije i jezike preuzmi iz ad grupe „${copy}“ (u Editoru: Copy/Paste targetinga) pre uključivanja.` : '') })
+    onMessage({ kind: res.ok ? 'ok' : 'err', text: res.text + (copy ? ` Ostala podešavanja ad grupe proveri prema „${copy}“ pre uključivanja.` : '') })
     loadDrafts()
   }
 
@@ -240,7 +250,9 @@ export default function DemandGenAdGroupForm({ client, market, brief, images, on
             </select></label>
           <label className="md:col-span-2"><span className={labelCls}>Naziv ad grupe</span>
             <input value={groupName} onChange={(e) => setGroupName(e.target.value)} placeholder="Akcija (Tg:Mix)" className={inputCls} /></label>
-          <label className="md:col-span-2"><span className={labelCls}>Publika i podešavanja kao u ad grupi</span>
+          <label className="md:col-span-2"><span className={labelCls}>Publika ad grupe (Audience name, kao u Editoru)</span>
+            <input value={audienceName} onChange={(e) => setAudienceName(e.target.value)} placeholder="DMG - Audience" className={inputCls} /></label>
+          <label className="md:col-span-2"><span className={labelCls}>Ostala podešavanja (lokacije, jezici) kao u ad grupi</span>
             <select value={copyFrom} onChange={(e) => setCopyFrom(e.target.value)} className={inputCls}>
               <option value="">— ne kopiraj —</option>
               {(campaigns.find((c) => c.campaign === campaign)?.ad_groups ?? []).map((g) => <option key={g} value={g}>{g}</option>)}

@@ -455,7 +455,8 @@ export default function MorningReview() {
 
   function exportNegatives() {
     const esc = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s)
-    const lines = ['Campaign,Ad group,Keyword,Criterion Type', ...approvedNegatives.map((r) => [esc(r.campaign), '', esc(r.term), 'Negative Exact'].join(','))]
+    // Campaign-level exact negatives, written the way Editor exports them ("Campaign Negative Exact").
+    const lines = ['Campaign,Keyword,Criterion Type,Status', ...approvedNegatives.map((r) => [esc(r.campaign), esc(r.term), 'Campaign Negative Exact', 'Enabled'].join(','))]
     const name = clients.find((c) => c.client_id === clientId)?.clients?.name ?? 'klijent'
     downloadText(`negativne_${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}_${run?.run_date ?? ''}.csv`, lines.join('\r\n') + '\r\n')
   }

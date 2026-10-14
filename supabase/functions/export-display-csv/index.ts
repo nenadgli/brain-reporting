@@ -16,14 +16,13 @@ const CORS = {
 }
 const json = (obj: unknown, status: number) => new Response(JSON.stringify(obj), { status, headers: { ...CORS, 'Content-Type': 'application/json' } })
 
-// NOTE: campaign and status columns follow Editor's PMax export; the ad type value and ad columns
-// are not yet checked against an Editor export of a responsive display ad.
+// Columns and values as in Editor's export of the F&F BA account (2026-10-14) (KIKO Display campaigns).
 const HEADLINES = Array.from({ length: 5 }, (_, i) => `Headline ${i + 1}`)
 const DESCRIPTIONS = Array.from({ length: 5 }, (_, i) => `Description ${i + 1}`)
 const VIDEOS = Array.from({ length: 5 }, (_, i) => `Video ID ${i + 1}`)
 const HEADER = [
   'Campaign', 'Campaign Type', 'Networks', 'Budget', 'Budget type', 'Bid Strategy Type', 'Start Date', 'End Date', 'Languages', 'Location',
-  'Ad Group', 'Ad type', ...HEADLINES, 'Long headline', ...DESCRIPTIONS, 'Business name', 'Call to action', ...VIDEOS, 'Final URL',
+  'Ad Group', 'Ad Group Type', 'Ad type', ...HEADLINES, 'Long headline', ...DESCRIPTIONS, 'Business name', 'Call to action', ...VIDEOS, 'Final URL',
   'Campaign Status', 'Ad Group Status', 'Status',
 ]
 
@@ -38,12 +37,12 @@ function rowsFor(d: any): Record<string, unknown>[] {
   if (d.mode === 'campaign') {
     rows.push({
       Campaign: d.campaign_name, 'Campaign Type': 'Display', Networks: 'Display Network', Budget: d.daily_budget, 'Budget type': 'Daily',
-      'Bid Strategy Type': 'Maximize conversions', 'Start Date': d.start_date, 'End Date': d.end_date, Languages: (d.languages ?? []).join(';'),
+      'Bid Strategy Type': 'Maximize conversions', 'Start Date': d.start_date, 'End Date': d.end_date, Languages: (d.languages ?? []).join(';') || 'All',
       'Campaign Status': 'Paused',
     })
     for (const loc of d.locations ?? []) rows.push({ Campaign: d.campaign_name, Location: loc })
   }
-  rows.push({ Campaign: d.campaign_name, 'Ad Group': d.ad_group_name, 'Ad Group Status': 'Paused' })
+  rows.push({ Campaign: d.campaign_name, 'Ad Group': d.ad_group_name, 'Ad Group Type': 'Standard', 'Ad Group Status': 'Paused' })
   const ad: Record<string, unknown> = {
     Campaign: d.campaign_name, 'Ad Group': d.ad_group_name, 'Ad type': 'Responsive display ad', Status: 'Paused',
     'Long headline': d.long_headline, 'Business name': d.business_name, 'Call to action': d.call_to_action, 'Final URL': d.final_url,

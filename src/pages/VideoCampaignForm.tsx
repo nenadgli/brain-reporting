@@ -133,9 +133,9 @@ export default function VideoCampaignForm({ client, market, brief, onMessage }: 
   if (!vids.length) problems.push('Dodaj bar jedan YouTube video (trejler).')
   if (vids.some((v) => !v)) problems.push('Neki video nije YouTube link ni ID.')
   if (vids.length > 5) problems.push('Najviše 5 videa.')
-  if (hl.length < 1 || hl.length > 5 || hl.some((h) => h.length > 15)) problems.push('Potrebno je 1–5 naslova do 15 znakova.')
+  if (hl.length < 1 || hl.length > 5 || hl.some((h) => h.length > 30)) problems.push('Potrebno je 1–5 naslova do 30 znakova.')
   if (lh.length < 1 || lh.length > 5 || lh.some((h) => h.length > 90)) problems.push('Potrebno je 1–5 dugih naslova do 90 znakova.')
-  if (ds.length < 1 || ds.length > 5 || ds.some((d) => d.length > 70)) problems.push('Potrebno je 1–5 opisa do 70 znakova.')
+  if (ds.length < 1 || ds.length > 5 || ds.some((d) => d.length > 90)) problems.push('Potrebno je 1–5 opisa do 90 znakova.')
   if (cta.length > 10) problems.push('Poziv na akciju može imati najviše 10 znakova.')
 
   const warnings: string[] = []
@@ -240,11 +240,11 @@ export default function VideoCampaignForm({ client, market, brief, onMessage }: 
             </button>
             {rationale && <span className="text-xs text-[var(--color-ink-soft)]">{rationale}</span>}
           </div>
-          <label className="md:col-span-2"><span className={labelCls}>Naslovi (1–5, do 15 znakova) · {n(hl, 15)}</span>
+          <label className="md:col-span-2"><span className={labelCls}>Naslovi (1–5, do 30 znakova) · {n(hl, 30)}</span>
             <textarea value={headlines} onChange={(e) => setHeadlines(e.target.value)} rows={5} className={inputCls} /></label>
           <label className="md:col-span-2"><span className={labelCls}>Dugi naslovi (1–5, do 90 znakova) · {n(lh, 90)}</span>
             <textarea value={longHeadlines} onChange={(e) => setLongHeadlines(e.target.value)} rows={5} className={inputCls} /></label>
-          <label className="md:col-span-2"><span className={labelCls}>Opisi (1–5, do 70 znakova) · {n(ds, 70)}</span>
+          <label className="md:col-span-2"><span className={labelCls}>Opisi (1–5, do 90 znakova) · {n(ds, 90)}</span>
             <textarea value={descriptions} onChange={(e) => setDescriptions(e.target.value)} rows={4} className={inputCls} /></label>
           <label><span className={labelCls}>Poziv na akciju ({cta.length}/10)</span>
             <input value={cta} onChange={(e) => setCta(e.target.value)} className={inputCls} /></label>

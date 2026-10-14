@@ -130,9 +130,9 @@ export async function downloadEditorPackage(basename: string, csv: string, asset
     const zip = zipSync(files, { level: 0 })
     downloadBlob(`${basename}.zip`, new Blob([zip as BlobPart], { type: 'application/zip' }))
     const n = Object.keys(files).length - 1
-    return { ok: true, text: `Paket je preuzet (CSV + ${n} slika). Otpakuj ga, pa u Editoru: Import → From file → editor.csv iz tog foldera → proveri izmene → Post.` }
+    return { ok: true, text: `Paket je preuzet (CSV + ${n} slika). Otpakuj ga, pa u Editoru: Import → From file → editor.csv → proveri izmene; slike iz foldera images/ dodaj oglasima ručno (Editor ih ne uvozi iz CSV-a) → Post.` }
   } catch (e) {
     downloadText(`${basename}.csv`, csv)
-    return { ok: false, text: `Slike nisu spakovane (${(e as Error).message}). Preuzet je samo CSV; kolone sa slikama očekuju folder images/ pored njega.` }
+    return { ok: false, text: `Slike nisu spakovane (${(e as Error).message}). Preuzet je samo CSV; slike preuzmi iz Productive-a i dodaj ih u Editoru ručno.` }
   }
 }
