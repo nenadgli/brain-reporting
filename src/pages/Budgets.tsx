@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { downloadText } from '../lib/creatives'
 import { logAction } from '../lib/ppcTasks'
+import AllocationPanel from './AllocationPanel'
 
 // Replaces the "Budgets & Optimization" sheets and the monthly "Potrošnja - All clients" sheet:
 // the team types monthly budgets per campaign, Brain fills in spend and the daily budget that
@@ -64,7 +65,7 @@ const esc = (s: string) => (/[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
 const slug = (s: string) => s.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 
 export default function Budgets() {
-  const [mode, setMode] = useState<'campaigns' | 'spend'>('campaigns')
+  const [mode, setMode] = useState<'campaigns' | 'allocation' | 'spend'>('campaigns')
   const [clients, setClients] = useState<Client[]>([])
   const [currencies, setCurrencies] = useState<Record<string, string>>({})
   const [clientId, setClientId] = useState('')
@@ -115,7 +116,7 @@ export default function Budgets() {
     if (error) { setMessage({ kind: 'err', text: error.message }); return }
     setSpend((data ?? []) as SpendRow[])
   }
-  useEffect(() => { if (mode === 'campaigns') loadPlan(); else loadSpend() }, [mode, clientId, month]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (mode === 'campaigns') loadPlan(); else if (mode === 'spend') loadSpend() }, [mode, clientId, month]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const key = (r: Pick<Row, 'network' | 'campaign'>) => `${r.network}|${r.campaign}`
   const cur = currencies[clientId] ?? 'EUR'
@@ -195,7 +196,7 @@ export default function Budgets() {
   }, [rows])
 
   const inputCls = 'rounded border border-[var(--color-line)] bg-white px-3 py-1.5 text-sm'
-  const months = [-1, 0, 1].map(monthStart)
+  const months = (mode === 'allocation' ? [0, 1, 2] : [-1, 0, 1]).map(monthStart)
 
   return (
     <div>
@@ -209,11 +210,11 @@ export default function Budgets() {
         </div>
         <div className="flex flex-wrap items-end gap-3 text-sm">
           <div className="flex overflow-hidden rounded border border-[var(--color-line)]">
-            {([['campaigns', 'Po kampanjama'], ['spend', 'Potrošnja svih klijenata']] as const).map(([k, l]) => (
-              <button key={k} onClick={() => setMode(k)} className={`px-3 py-1.5 ${mode === k ? 'bg-[var(--color-indigo)] text-white' : 'bg-white'}`}>{l}</button>
+            {([['campaigns', 'Po kampanjama'], ['allocation', 'Alokacija za mesec'], ['spend', 'Potrošnja svih klijenata']] as const).map(([k, l]) => (
+              <button key={k} onClick={() => { setMode(k); setMessage(null); if (k === 'allocation' && month < monthStart(1)) setMonth(monthStart(1)); if (k !== 'allocation' && month > monthStart(1)) setMonth(monthStart(1)) }} className={`px-3 py-1.5 ${mode === k ? 'bg-[var(--color-indigo)] text-white' : 'bg-white'}`}>{l}</button>
             ))}
           </div>
-          {mode === 'campaigns' && (
+          {mode !== 'spend' && (
             <label><span className="mb-1 block text-[var(--color-ink-soft)]">Klijent</span>
               <select value={clientId} onChange={(e) => setClientId(e.target.value)} className={inputCls}>
                 {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -229,7 +230,8 @@ export default function Budgets() {
       {message && (
         <p className={`mb-6 rounded px-4 py-2 text-sm ${message.kind === 'ok' ? 'bg-[var(--color-indigo-soft)] text-[var(--color-indigo-dark)]' : 'bg-red-50 text-[var(--color-rust)]'}`}>{message.text}</p>
       )}
-      {loading && <p className="mb-4 text-sm text-[var(--color-ink-soft)]">Učitavam…</p>}
+      {mode === 'allocation' && <AllocationPanel key={`${clientId}|${month}`} clientId={clientId} month={month} monthLabel={monthLabel(month)} cur={cur} />}
+      {mode !== 'allocation' && loading && <p className="mb-4 text-sm text-[var(--color-ink-soft)]">Učitavam…</p>}
 
       {mode === 'campaigns' && !loading && (
         <>

@@ -72,3 +72,6 @@ verify_jwt = true
 
 [functions.export-display-csv]
 verify_jwt = true
+
+[functions.budget-allocation]
+verify_jwt = true
