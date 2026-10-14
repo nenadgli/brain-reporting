@@ -437,7 +437,8 @@ export default function MorningReview() {
 
   function exportPlacements() {
     const esc = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s)
-    const lines = ['Campaign,Placement,Name,Type', ...approvedPlacements.map((r) => [esc(r.campaign), esc(r.exclusion), esc(r.name), r.type].join(','))]
+    // Placements are summed for the whole account ("(nalog)"): one row per placement for the account-level exclusion list.
+    const lines = ['Placement,Name,Type', ...approvedPlacements.map((r) => [esc(r.exclusion), esc(r.name), r.type].join(','))]
     const name = clients.find((c) => c.client_id === clientId)?.clients?.name ?? 'klijent'
     downloadText(`iskljuceni-plasmani_${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}_${run?.run_date ?? ''}.csv`, lines.join('\r\n') + '\r\n')
   }
@@ -606,7 +607,7 @@ export default function MorningReview() {
           {approvedPlacements.length > 0 && (
             <section className="mb-10 rounded border border-[var(--color-line)] bg-white p-5">
               <p className="text-sm font-medium">Odobreni plasmani za isključivanje · {approvedPlacements.length} redova</p>
-              <p className="mt-1 text-xs text-[var(--color-ink-soft)]">Kolona Placement je u obliku koji prima Google Ads lista isključenih plasmana (sajt, mobileapp::…, youtube.com/channel/…). Kolona Campaign kaže gde se plasman pojavio.</p>
+              <p className="mt-1 text-xs text-[var(--color-ink-soft)]">Kolona Placement je u obliku koji prima Google Ads lista isključenih plasmana na nivou naloga (sajt, mobileapp::…, youtube.com/channel/…): Tools → Content suitability → Excluded placements.</p>
               <button onClick={exportPlacements} className="mt-3 rounded border border-[var(--color-indigo)] px-4 py-1.5 text-sm font-medium text-[var(--color-indigo-dark)]">Izvezi CSV</button>
             </section>
           )}
