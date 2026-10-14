@@ -84,6 +84,8 @@ export default function DisplayAdForm({ client, market, brief, images, onSaved, 
 
   useEffect(() => {
     setBusinessName(client.name.replace(/\s+(RS|HR|BA|ME|SI|AL)$/i, '').slice(0, 25))
+    supabase.from('client_editor_defaults').select('business_name').eq('client_id', client.id).maybeSingle()
+      .then(({ data }) => { if (data?.business_name) setBusinessName(data.business_name) })
     supabase.rpc('display_campaigns', { p_client_id: client.id }).then(({ data }) => {
       const list = (data ?? []) as DisplayCampaign[]
       setCampaigns(list)

@@ -14,20 +14,21 @@ const CORS = {
 }
 const json = (obj: unknown, status: number) => new Response(JSON.stringify(obj), { status, headers: { ...CORS, 'Content-Type': 'application/json' } })
 
-// Columns and values as in Editor's export of the F&F BA account (2026-10-14): Target CPM campaigns
-// with an "Efficient reach" ad group, Target CPV campaigns with a "Responsive video" ad group; the bid
-// sits on the ad group; the ad is a "Responsive video ad" with "Call to action 1".
+// Columns and values as in Editor's exports of the F&F BA and Editus accounts (2026-10-14): reach
+// campaigns bid Target CPM and views campaigns Target CPV, both with a "Responsive video" ad group
+// that holds the bid and, often, an audience by name; the ad is a "Responsive video ad" with a
+// business name, Path 1 and "Call to action 1".
 const VIDEOS = Array.from({ length: 5 }, (_, i) => `Video ID ${i + 1}`)
 const HEADLINES = Array.from({ length: 5 }, (_, i) => `Headline ${i + 1}`)
 const LONG_HEADLINES = Array.from({ length: 5 }, (_, i) => `Long headline ${i + 1}`)
 const DESCRIPTIONS = Array.from({ length: 5 }, (_, i) => `Description ${i + 1}`)
 const HEADER = [
   'Campaign', 'Campaign Type', 'Networks', 'Budget', 'Budget type', 'Bid Strategy Type', 'Start Date', 'End Date', 'Languages', 'Location',
-  'Ad Group', 'Ad Group Type', 'Target CPM', 'Target CPV', 'Ad type', 'Ad Name', 'Final URL', ...VIDEOS, ...HEADLINES, ...LONG_HEADLINES, ...DESCRIPTIONS,
-  'Call to action 1', 'Campaign Status', 'Ad Group Status', 'Status',
+  'Ad Group', 'Ad Group Type', 'Target CPM', 'Target CPV', 'Audience name', 'Ad type', 'Ad Name', 'Final URL', 'Path 1', ...VIDEOS, ...HEADLINES, ...LONG_HEADLINES, ...DESCRIPTIONS,
+  'Business name', 'Call to action 1', 'Campaign Status', 'Ad Group Status', 'Status',
 ]
 const GOAL = {
-  reach: { bid: 'Target CPM', groupType: 'Efficient reach', bidCol: 'Target CPM' },
+  reach: { bid: 'Target CPM', groupType: 'Responsive video', bidCol: 'Target CPM' },
   views: { bid: 'Target CPV', groupType: 'Responsive video', bidCol: 'Target CPV' },
 } as const
 
@@ -40,15 +41,15 @@ function esc(v: unknown): string {
 function rowsFor(d: any): Record<string, unknown>[] {
   const g = GOAL[d.goal as 'reach' | 'views']
   const rows: Record<string, unknown>[] = [{
-    Campaign: d.campaign_name, 'Campaign Type': 'Video', Networks: 'YouTube Search;YouTube Videos;Video Partners',
+    Campaign: d.campaign_name, 'Campaign Type': 'Video', Networks: 'YouTube Search;YouTube Videos',
     Budget: d.total_budget, 'Budget type': 'Campaign total', 'Bid Strategy Type': g.bid, 'Start Date': d.start_date, 'End Date': d.end_date,
     Languages: (d.languages ?? []).join(';') || 'All', 'Campaign Status': 'Paused',
   }]
   for (const loc of d.locations ?? []) rows.push({ Campaign: d.campaign_name, Location: loc })
-  rows.push({ Campaign: d.campaign_name, 'Ad Group': d.ad_group_name, 'Ad Group Type': g.groupType, [g.bidCol]: d.target_bid, 'Ad Group Status': 'Paused' })
+  rows.push({ Campaign: d.campaign_name, 'Ad Group': d.ad_group_name, 'Ad Group Type': g.groupType, [g.bidCol]: d.target_bid, 'Audience name': d.audience_name, 'Ad Group Status': 'Paused' })
   const ad: Record<string, unknown> = {
     Campaign: d.campaign_name, 'Ad Group': d.ad_group_name, 'Ad type': 'Responsive video ad', 'Ad Name': d.title, Status: 'Paused',
-    'Final URL': d.final_url, 'Call to action 1': d.call_to_action,
+    'Final URL': d.final_url, 'Path 1': d.path1, 'Business name': d.business_name, 'Call to action 1': d.call_to_action,
   }
   ;(d.video_ids ?? []).slice(0, 5).forEach((v: string, i: number) => { ad[VIDEOS[i]] = v })
   ;(d.headlines ?? []).slice(0, 5).forEach((v: string, i: number) => { ad[HEADLINES[i]] = v })

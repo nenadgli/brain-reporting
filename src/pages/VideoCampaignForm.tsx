@@ -42,9 +42,11 @@ const MARKET_GEO: Record<string, { location: string; language: string }> = {
 const GOAL_LABEL: Record<Goal, string> = { reach: 'Video reach (Combo, target CPM)', views: 'Video views (responsive video, target CPV)' }
 
 const lines = (s: string) => s.split('\n').map((x) => x.trim()).filter(Boolean)
+// Exactly as in the Editus account, including the team's spaces ("Video_Reach ;", "Tg:All ;"),
+// so filters and reports keep matching.
 const names = (title: string, market: string, goal: Goal) => ({
-  campaign: `${title} (Mkt:${market};Ct:${goal === 'reach' ? 'Video_Reach' : 'Video_Views'};Ph:All)`,
-  adGroup: goal === 'reach' ? `${title} (Tg:Mix;Ad:Combo)` : `${title} (Tg:All;Ad:RVA)`,
+  campaign: `${title} (Mkt:${market};Ct:${goal === 'reach' ? 'Video_Reach ' : 'Video_Views'};Ph:All)`,
+  adGroup: goal === 'reach' ? `${title} (Tg:Mix;Ad:Combo)` : `${title} (Tg:All ;Ad:RVA)`,
 })
 
 function youtubeId(raw: string): string | null {
@@ -68,6 +70,10 @@ export default function VideoCampaignForm({ client, market, brief, onMessage }: 
   const [longHeadlines, setLongHeadlines] = useState('')
   const [descriptions, setDescriptions] = useState('')
   const [cta, setCta] = useState('')
+  const [businessName, setBusinessName] = useState('')
+  const [path1, setPath1] = useState('')
+  // Ad group audience by name, as Editor shows it ("Children Fantasy movie lovers").
+  const [audienceName, setAudienceName] = useState('')
   const [rationale, setRationale] = useState('')
   const [drafting, setDrafting] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -78,6 +84,8 @@ export default function VideoCampaignForm({ client, market, brief, onMessage }: 
 
   useEffect(() => {
     supabase.rpc('video_campaign_history', { p_client_id: client.id }).then(({ data }) => setHistory((data ?? []) as History[]))
+    supabase.from('client_editor_defaults').select('business_name').eq('client_id', client.id).maybeSingle()
+      .then(({ data }) => setBusinessName(data?.business_name ?? client.name.replace(/\s+(RS|HR|BA|ME|SI|AL)$/i, '').slice(0, 25)))
   }, [client.id])
 
   useEffect(() => {
@@ -137,6 +145,8 @@ export default function VideoCampaignForm({ client, market, brief, onMessage }: 
   if (lh.length < 1 || lh.length > 5 || lh.some((h) => h.length > 90)) problems.push('Potrebno je 1–5 dugih naslova do 90 znakova.')
   if (ds.length < 1 || ds.length > 5 || ds.some((d) => d.length > 90)) problems.push('Potrebno je 1–5 opisa do 90 znakova.')
   if (cta.length > 10) problems.push('Poziv na akciju može imati najviše 10 znakova.')
+  if (businessName.length > 25) problems.push('Naziv firme može imati najviše 25 znakova.')
+  if (path1.length > 15) problems.push('Path može imati najviše 15 znakova.')
 
   const warnings: string[] = []
   for (const g of chosen) {
@@ -155,6 +165,7 @@ export default function VideoCampaignForm({ client, market, brief, onMessage }: 
         start_date: start, end_date: end, total_budget: num(budget[g]), target_bid: bid[g] ? num(bid[g]) : null,
         locations: [geo.location], languages: [geo.language], final_url: finalUrl.trim(), video_ids: vids.filter(Boolean),
         headlines: hl, long_headlines: lh, descriptions: ds, call_to_action: cta || null,
+        business_name: businessName.trim() || null, path1: path1.trim() || null, audience_name: audienceName.trim() || null,
         brief_task_id: brief?.task_id ?? null, created_by: 'brain-ui',
       }
     })
@@ -246,6 +257,12 @@ export default function VideoCampaignForm({ client, market, brief, onMessage }: 
             <textarea value={longHeadlines} onChange={(e) => setLongHeadlines(e.target.value)} rows={5} className={inputCls} /></label>
           <label className="md:col-span-2"><span className={labelCls}>Opisi (1–5, do 90 znakova) · {n(ds, 90)}</span>
             <textarea value={descriptions} onChange={(e) => setDescriptions(e.target.value)} rows={4} className={inputCls} /></label>
+          <label><span className={labelCls}>Naziv firme ({businessName.length}/25)</span>
+            <input value={businessName} onChange={(e) => setBusinessName(e.target.value)} className={inputCls} /></label>
+          <label><span className={labelCls}>Path ({path1.length}/15)</span>
+            <input value={path1} onChange={(e) => setPath1(e.target.value)} placeholder="zaboravljeni" className={inputCls} /></label>
+          <label className="md:col-span-2"><span className={labelCls}>Publika ad grupe (Audience name, kao u Editoru; opciono)</span>
+            <input value={audienceName} onChange={(e) => setAudienceName(e.target.value)} placeholder="Fantasy movie lovers" className={inputCls} /></label>
           <label><span className={labelCls}>Poziv na akciju ({cta.length}/10)</span>
             <input value={cta} onChange={(e) => setCta(e.target.value)} className={inputCls} /></label>
           <div className="text-xs text-[var(--color-ink-soft)]">Lokacija: {geo.location} · jezik: {geo.language}</div>
