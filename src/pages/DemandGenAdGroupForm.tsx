@@ -36,8 +36,19 @@ const CTAS = ['', 'Shop now', 'Learn more', 'Get offer', 'Sign up', 'Contact us'
 
 const lines = (s: string) => s.split('\n').map((x) => x.trim()).filter(Boolean)
 
-// "Akcija -20% (Tg:Mix)" like the ad groups already in the campaign.
-const groupNameFromBrief = (b: Brief) => `${(b.headline ?? b.title).trim()} (Tg:Mix)`
+const pad = (n: number) => String(n).padStart(2, '0')
+
+// "Akcija 08.-11.10. (Tg:Mix)": the campaign's naming, with the dates so that repeated
+// generic actions ("Akcija") stay apart.
+function groupNameFromBrief(b: Brief): string {
+  const base = (b.headline ?? b.title).trim()
+  if (!b.start_date) return `${base} (Tg:Mix)`
+  const [, sm, sd] = b.start_date.split('-').map(Number)
+  if (!b.end_date || b.end_date === b.start_date) return `${base} ${pad(sd)}.${pad(sm)}. (Tg:Mix)`
+  const [, em, ed] = b.end_date.split('-').map(Number)
+  const dates = sm === em ? `${pad(sd)}.-${pad(ed)}.${pad(em)}.` : `${pad(sd)}.${pad(sm)}.-${pad(ed)}.${pad(em)}.`
+  return `${base} ${dates} (Tg:Mix)`
+}
 
 function youtubeId(raw: string): string | null {
   const t = raw.trim()
