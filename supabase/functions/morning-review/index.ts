@@ -210,10 +210,15 @@ const SYSTEM =
   'Datume pisi kao 13.10., iznose kao u dokazu sa oznakom valute klijenta. Ne koristi engleske reci kao baseline; pisi "uobicajeno (prosek istog dana u nedelji)". ' +
   'Nista se ne menja u nalogu automatski; predlog je za coveka koji odobrava.'
 
-function buildPrompt(clientName: string, params: Record<string, unknown>, dataDate: string, stale: boolean, terms: Candidate[], others: Candidate[], placements: Candidate[] = []) {
+function buildPrompt(clientName: string, params: Record<string, unknown>, dataDate: string, stale: boolean, terms: Candidate[], others: Candidate[], placements: Candidate[] = [], feedback: string[] = []) {
   return [
     `Klijent: ${clientName}. Valuta naloga: ${CUR}. Podaci zakljucno sa ${dataDate}.${stale ? ' UPOZORENJE: jutrosnji sync podataka nije uspeo, podaci mogu biti nepotpuni.' : ''}`,
     `Pravila klijenta: konkurenti ${JSON.stringify(params.competitors)}; brendovi koje klijent prodaje ${JSON.stringify(params.brands_sold)}.`,
+    ...(feedback.length ? [
+      '',
+      'KOMENTARI TIMA ZA OVOG KLIJENTA (odluke o ranijim nalazima i zatvoreni taskovi, najnoviji prvi). Primeni ih: ako je tim odbio isti ili slican nalaz i objasnio zasto, stavi keep=false ili to uzmi u obzir u predlogu; pravila iz komentara vaze dok ih novi komentar ne promeni.',
+      ...feedback,
+    ] : []),
     '',
     'ZADATAK 1, search termini koji su trosili bez konverzije. Za svaki termin odredi:',
     '- kind: konkurent (druga prodavnica ili brend koji klijent ne prodaje), nebitno (nema veze sa ponudom), relevantno (brend koji klijent prodaje ili kategorija iz ponude).',
@@ -240,6 +245,21 @@ function buildPrompt(clientName: string, params: Record<string, unknown>, dataDa
     '- keep=false samo kad je ocigledno da nalaz nije problem.',
     JSON.stringify(others.map((o) => ({ fingerprint: o.fingerprint, check_type: o.check_type, severity: o.severity, title: titleFor(o), evidence: o.evidence }))),
   ].join('\n')
+}
+
+// The team's comments from the last 90 days: on findings (approved, rejected, postponed, done) and on
+// closed PPC tasks. The model reads them as the client's rules.
+async function teamFeedback(clientId: string): Promise<string[]> {
+  const since = new Date(Date.now() - 90 * 864e5).toISOString()
+  const [{ data: f }, { data: t }] = await Promise.all([
+    sb.from('review_findings').select('check_type, title, status, decision_reason, decided_at')
+      .eq('client_id', clientId).not('decision_reason', 'is', null).gte('decided_at', since).order('decided_at', { ascending: false }).limit(40),
+    sb.from('ppc_task_reviews').select('task, comment, created_at').eq('client_id', clientId).gte('created_at', since).order('created_at', { ascending: false }).limit(15),
+  ])
+  return [
+    ...(f ?? []).filter((x) => String(x.decision_reason ?? '').trim()).map((x) => `- [${x.check_type}, ${x.status}] "${x.title}": ${String(x.decision_reason).trim()}`),
+    ...(t ?? []).map((x) => `- [zatvoren task ${x.task}, ${String(x.created_at).slice(0, 10)}]: ${String(x.comment).trim()}`),
+  ]
 }
 
 // deno-lint-ignore no-explicit-any
@@ -574,7 +594,7 @@ async function reviewClient(clientId: string, clientName: string, params: Record
       })
     }
     if (terms.length || others.length || placements.length) {
-      const { out, model: m } = await askClaude(buildPrompt(clientName, params, dataDate, stale, terms, others, placements))
+      const { out, model: m } = await askClaude(buildPrompt(clientName, params, dataDate, stale, terms, others, placements, await teamFeedback(clientId)))
       model = m
       const worded = new Map((out.findings ?? []).map((f: Record<string, unknown>) => [f.fingerprint, f]))
       for (const c of others) {

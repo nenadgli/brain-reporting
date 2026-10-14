@@ -17,8 +17,8 @@ type Run = {
   finished_at: string | null
 }
 type TeamNotes = { minutes_team?: string; minutes_tool?: string; only_tool?: string; missed?: string }
-type Status = 'novo' | 'odobreno' | 'odbijeno' | 'odlozeno' | 'izvrseno' | 'isteklo'
-type Finding = {
+export type Status = 'novo' | 'odobreno' | 'odbijeno' | 'odlozeno' | 'izvrseno' | 'isteklo'
+export type Finding = {
   id: string
   check_type: string
   severity: 'hitno' | 'visoko' | 'srednje' | 'info'
@@ -34,13 +34,13 @@ type Finding = {
 }
 type Term = { term: string; spend: number; clicks: number; campaigns: string[]; kind?: string; why?: string }
 
-const SEVERITY: Record<Finding['severity'], { label: string; cls: string }> = {
+export const SEVERITY: Record<Finding['severity'], { label: string; cls: string }> = {
   hitno: { label: 'Hitno', cls: 'bg-red-600 text-white' },
   visoko: { label: 'Visoko', cls: 'bg-[var(--color-rust)] text-white' },
   srednje: { label: 'Srednje', cls: 'bg-amber-100 text-amber-900' },
   info: { label: 'Info', cls: 'bg-slate-100 text-slate-700' },
 }
-const CHECK_LABEL: Record<string, string> = {
+export const CHECK_LABEL: Record<string, string> = {
   pacing: 'Trošenje prema planu',
   spend_anomaly: 'Odstupanje troška',
   spend_stopped: 'Kampanje bez troška',
@@ -57,14 +57,14 @@ const CHECK_LABEL: Record<string, string> = {
   ga4_tracking: 'Nedeljno · GA4 izvori',
   campaign_budgets: 'Mesečni budžeti',
 }
-const STATUS_LABEL: Record<Status, string> = {
+export const STATUS_LABEL: Record<Status, string> = {
   novo: 'Čeka odluku', odobreno: 'Odobreno', odbijeno: 'Odbijeno', odlozeno: 'Odloženo', izvrseno: 'Urađeno', isteklo: 'Isteklo',
 }
 
 const fmtInt = (n: number) => n.toLocaleString('sr-RS', { maximumFractionDigits: 0 })
 const shortDate = (d: string) => `${Number(d.slice(8, 10))}.${Number(d.slice(5, 7))}.`
 
-function Evidence({ f, cur }: { f: Finding; cur: string }) {
+export function Evidence({ f, cur }: { f: Finding; cur: string }) {
   const e = f.evidence
   if (f.check_type === 'search_terms') {
     const terms = (e.terms as Term[]) ?? []
