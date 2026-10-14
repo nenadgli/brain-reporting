@@ -1,6 +1,6 @@
 # Supabase
 
-Source of the Edge Functions deployed to Supabase. The deployed version is what runs; keep this folder in sync when you deploy.
+Source of the Brain database schema and the Edge Functions deployed to Supabase. The deployed version is what runs; keep this folder in sync when you deploy.
 
 - `functions/` — Brain project `yryclxxuueupuruowjvn`. `config.toml` holds each function's `verify_jwt`.
 - `feedhub/functions/` — the two Feed Hub (`bagpjjejeuteojpsufto`) functions that Brain uses:
@@ -29,3 +29,18 @@ and `internal_secrets` (`productive_file_signing_key`).
 Scheduling is done with pg_cron in the Brain database: `daily-windsor-sync` (04:00 UTC, fills `sync_queue`),
 `dispatch-sync-queue` (every minute, 15 jobs at a time) and `morning-review` (05:00 UTC).
 `daily-sync` is kept for manual runs only; called for all clients at once it hits Supabase's per-trace rate limit.
+
+## Database migrations
+
+`migrations/` holds every migration applied to the Brain database, exported from
+`supabase_migrations.schema_migrations` and checked byte for byte (md5) against what was applied.
+Apply new schema changes as a migration and add the file here; changes made with plain SQL in the
+dashboard are not reproducible. Data (clients, media plans, synced metrics) and secret values are not
+in the migrations.
+
+Known differences between the database and the migrations:
+
+- `public._mpl_stage` is a leftover staging table from a media-plan import (RLS on, no access). It is not
+  in any migration and can be dropped: `drop table public._mpl_stage;`
+- Feed Hub schema changes made for Brain (`productive_task_attachments`, `internal_secrets`,
+  `external_api_keys`, the `productive-attachments` bucket) live in the Feed Hub project's own migration history.
