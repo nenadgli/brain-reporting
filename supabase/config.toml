@@ -75,3 +75,9 @@ verify_jwt = true
 
 [functions.budget-allocation]
 verify_jwt = true
+
+[functions.search-ads-sync]
+verify_jwt = true
+
+[functions.rsa-refresh]
+verify_jwt = true

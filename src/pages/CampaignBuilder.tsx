@@ -5,6 +5,7 @@ import PmaxAssetGroupForm from './PmaxAssetGroupForm'
 import DemandGenAdGroupForm from './DemandGenAdGroupForm'
 import VideoCampaignForm from './VideoCampaignForm'
 import DisplayAdForm from './DisplayAdForm'
+import RsaRefresh from './RsaRefresh'
 
 type ClientRow = { id: string; name: string; ga4_store: string | null }
 type Draft = {
@@ -105,6 +106,8 @@ export default function CampaignBuilder() {
   const [attLoading, setAttLoading] = useState(false)
   const [attError, setAttError] = useState('')
   const [mode, setMode] = useState<AssetMode>('search')
+  // Refreshing existing Search ads is its own screen, without briefs and images.
+  const [refresh, setRefresh] = useState(false)
   const [images, setImages] = useState<ImageAsset[]>([])
   const [imageNotes, setImageNotes] = useState<Record<string, string>>({})
 
@@ -408,12 +411,19 @@ export default function CampaignBuilder() {
 
       <div className="mb-6 inline-flex rounded border border-[var(--color-line)] bg-white p-0.5 text-sm">
         {([['search', 'Search kampanja'], ['pmax', 'PMax asset grupa'], ['dg', 'Demand Gen ad grupa'], ['video', 'YouTube video'], ['display', 'Display oglas']] as const).map(([m, label]) => (
-          <button key={m} type="button" onClick={() => switchMode(m)}
-            className={`rounded px-4 py-1.5 ${mode === m ? 'bg-[var(--color-indigo)] text-white' : 'text-[var(--color-ink-soft)]'}`}>
+          <button key={m} type="button" onClick={() => { setRefresh(false); switchMode(m) }}
+            className={`rounded px-4 py-1.5 ${!refresh && mode === m ? 'bg-[var(--color-indigo)] text-white' : 'text-[var(--color-ink-soft)]'}`}>
             {label}
           </button>
         ))}
+        <button type="button" onClick={() => { setRefresh(true); setMessage(null) }}
+          className={`rounded px-4 py-1.5 ${refresh ? 'bg-[var(--color-indigo)] text-white' : 'text-[var(--color-ink-soft)]'}`}>
+          Osvežavanje Search oglasa
+        </button>
       </div>
+
+      {refresh && client && <RsaRefresh clientId={client.id} clientName={client.name} />}
+      {!refresh && <>
 
       {message && (
         <p className={`mb-6 rounded px-4 py-2 text-sm ${message.kind === 'ok' ? 'bg-[var(--color-indigo-soft)] text-[var(--color-indigo-dark)]' : 'bg-red-50 text-[var(--color-rust)]'}`}>
@@ -696,6 +706,7 @@ export default function CampaignBuilder() {
         </div>
       </section>
       </>)}
+      </>}
     </div>
   )
 }

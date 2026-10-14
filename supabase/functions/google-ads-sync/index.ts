@@ -43,7 +43,8 @@ Deno.serve(async (req: Request) => {
       // Impression share / quality score, campaign+date grain only (no device split).
       const isParams = new URLSearchParams({
         ...dP, api_key: WINDSOR_API_KEY, select_accounts: rawAccountId,
-        fields: 'date,campaign,search_impression_share,search_lost_is_budget,search_lost_is_rank,quality_score',
+        // Windsor's names for the lost-share fields; search_lost_is_budget/rank do not exist and came back empty.
+        fields: 'date,campaign,search_impression_share,search_budget_lost_impression_share,search_rank_lost_impression_share,quality_score',
       })
       const isRes = await fetch(`https://connectors.windsor.ai/google_ads?${isParams.toString()}`)
       const isRows: Record<string, unknown>[] = isRes.ok ? (await isRes.json()).data ?? [] : []
@@ -78,8 +79,8 @@ Deno.serve(async (req: Request) => {
           spend: r.spend ?? 0, conversions: convMap.get(`${r.date}|${r.campaign}`) ?? 0, conversion_value: r.conversion_value ?? 0,
           unique_users: r.unique_users ?? 0,
           search_impression_share: isRow?.search_impression_share ?? null,
-          search_lost_is_budget: isRow?.search_lost_is_budget ?? null,
-          search_lost_is_rank: isRow?.search_lost_is_rank ?? null,
+          search_lost_is_budget: isRow?.search_budget_lost_impression_share ?? null,
+          search_lost_is_rank: isRow?.search_rank_lost_impression_share ?? null,
           quality_score: isRow?.quality_score ?? null,
         }
       })
