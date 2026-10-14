@@ -1,0 +1,9 @@
+# Feed Hub (Supabase project bagpjjejeuteojpsufto). Only the functions written for Brain live here.
+# Deploy from this folder: supabase functions deploy <name> --project-ref bagpjjejeuteojpsufto
+project_id = "feedhub-brain"
+
+[functions.export-campaign-briefs]
+verify_jwt = false
+
+[functions.productive-file]
+verify_jwt = false

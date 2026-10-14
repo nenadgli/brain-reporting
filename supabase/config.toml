@@ -1,0 +1,59 @@
+# Brain (Supabase project yryclxxuueupuruowjvn). Deploy: supabase functions deploy <name> --project-ref yryclxxuueupuruowjvn
+project_id = "brain-reporting"
+
+[functions.chat]
+verify_jwt = false
+
+[functions.daily-sync]
+verify_jwt = true
+
+[functions.export-editor-csv]
+verify_jwt = true
+
+[functions.export-pmax-csv]
+verify_jwt = true
+
+[functions.facebook-ads-creatives-sync]
+verify_jwt = true
+
+[functions.facebook-ads-placements-sync]
+verify_jwt = true
+
+[functions.facebook-ads-sync]
+verify_jwt = true
+
+[functions.ga4-sync]
+verify_jwt = true
+
+[functions.google-ads-competitors-sync]
+verify_jwt = true
+
+[functions.google-ads-keywords-sync]
+verify_jwt = true
+
+[functions.google-ads-search-terms-sync]
+verify_jwt = true
+
+[functions.google-ads-sync]
+verify_jwt = true
+
+[functions.google-granular-sync]
+verify_jwt = true
+
+[functions.mcp-server]
+verify_jwt = false
+
+[functions.meta-adset-sync]
+verify_jwt = true
+
+[functions.morning-review]
+verify_jwt = true
+
+[functions.productive-briefs]
+verify_jwt = true
+
+[functions.suggest-campaign]
+verify_jwt = true
+
+[functions.windsor-sync]
+verify_jwt = true
