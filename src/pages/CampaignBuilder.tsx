@@ -5,6 +5,7 @@ import PmaxAssetGroupForm from './PmaxAssetGroupForm'
 import DemandGenAdGroupForm from './DemandGenAdGroupForm'
 import VideoCampaignForm from './VideoCampaignForm'
 import DisplayAdForm from './DisplayAdForm'
+import MetaCampaignForm from './MetaCampaignForm'
 import RsaRefresh from './RsaRefresh'
 
 type ClientRow = { id: string; name: string; ga4_store: string | null }
@@ -434,10 +435,10 @@ export default function CampaignBuilder() {
     <div>
       <header className="mb-8 flex items-end justify-between border-b border-[var(--color-line)] pb-6">
         <div>
-          <p className="eyebrow-label">Google Ads Editor &middot; nacrti kampanja</p>
+          <p className="eyebrow-label">Google Ads Editor i Meta Ads Manager &middot; nacrti kampanja</p>
           <h1 className="font-display mt-1 text-4xl font-medium">Nove kampanje</h1>
           <p className="mt-2 max-w-xl text-sm text-[var(--color-ink-soft)]">
-            Napravi nacrt, izvezi CSV i importuj ga u Google Ads Editor. Sve ulazi kao <b>Paused</b> i samo se dodaje; ništa ne ide u nalog dok ti ne klikneš Post.
+            Napravi nacrt, izvezi fajl i importuj ga u Google Ads Editor ili Meta Ads Manager. Sve ulazi kao <b>Paused</b> i samo se dodaje; ništa se ne uključuje bez tebe.
           </p>
         </div>
         <label className="text-sm">
@@ -449,7 +450,7 @@ export default function CampaignBuilder() {
       </header>
 
       <div className="mb-6 inline-flex rounded border border-[var(--color-line)] bg-white p-0.5 text-sm">
-        {([['search', 'Search kampanja'], ['pmax', 'PMax asset grupa'], ['dg', 'Demand Gen ad grupa'], ['video', 'YouTube video'], ['display', 'Display oglas']] as const).map(([m, label]) => (
+        {([['search', 'Search kampanja'], ['pmax', 'PMax asset grupa'], ['dg', 'Demand Gen ad grupa'], ['video', 'YouTube video'], ['display', 'Display oglas'], ['meta', 'Meta kampanja']] as const).map(([m, label]) => (
           <button key={m} type="button" onClick={() => { setRefresh(false); switchMode(m) }}
             className={`rounded px-4 py-1.5 ${!refresh && mode === m ? 'bg-[var(--color-indigo)] text-white' : 'text-[var(--color-ink-soft)]'}`}>
             {label}
@@ -581,7 +582,9 @@ export default function CampaignBuilder() {
             <p className="mb-1 text-sm font-medium">Kreative i prilozi{attachments.length ? ` · ${attachments.length}` : ''}</p>
             <p className="mb-3 text-xs text-[var(--color-ink-soft)]">
               Iz taska, podtaskova i komentara, čitaju se direktno iz Productive-a (ništa se ne kopira). Linkovi važe dva sata.
-              {mode !== 'search'
+              {mode === 'meta'
+                ? <>Čekiraj slike za Meta oglase ({images.length} izabrano): 1:1 i 4:5 za feed, 9:16 za story i reels.</>
+                : mode !== 'search'
                 ? <>Čekiraj „{mode === 'pmax' ? 'u asset grupu' : 'u oglas'}“ za slike i logotipe ({images.length} izabrano); tip se prepoznaje po dimenzijama.</>
                 : <>Čekiraj „u Editor“ za slike koje idu kao image assets uz ad grupu ({images.length}/{MAX_IMAGES}); dimenzije se proveravaju odmah.</>}
             </p>
@@ -616,11 +619,11 @@ export default function CampaignBuilder() {
                           {isImage && mode !== 'video' && (
                             <label className="mt-1 flex items-center gap-1">
                               <input type="checkbox" checked={picked} onChange={() => toggleImage(a)} />
-                              <span>{mode === 'pmax' ? 'u asset grupu' : mode === 'dg' || mode === 'display' ? 'u oglas' : 'u Editor'}</span>
+                              <span>{mode === 'pmax' ? 'u asset grupu' : mode === 'dg' || mode === 'display' || mode === 'meta' ? 'u oglas' : 'u Editor'}</span>
                             </label>
                           )}
                           {imageNotes[a.id] && <span className={`block ${picked ? 'text-[var(--color-ink-soft)]' : 'text-[var(--color-rust)]'}`}>{imageNotes[a.id]}</span>}
-                          {picked && mode !== 'search' && images.find((i) => i.attachment_id === a.id)?.ratio === '1:1' && (
+                          {picked && mode !== 'search' && mode !== 'meta' && images.find((i) => i.attachment_id === a.id)?.ratio === '1:1' && (
                             <label className="mt-0.5 flex items-center gap-1">
                               <input type="checkbox" checked={images.find((i) => i.attachment_id === a.id)?.field === 'LOGO'} onChange={() => toggleLogo(a.id)} />
                               <span>ovo je logo</span>
@@ -661,6 +664,17 @@ export default function CampaignBuilder() {
 
       {mode === 'display' && client && (
         <DisplayAdForm
+          client={client}
+          market={market}
+          brief={brief}
+          images={images}
+          onSaved={() => { setImages([]); setImageNotes({}) }}
+          onMessage={setMessage}
+        />
+      )}
+
+      {mode === 'meta' && client && (
+        <MetaCampaignForm
           client={client}
           market={market}
           brief={brief}

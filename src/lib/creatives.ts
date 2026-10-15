@@ -49,14 +49,15 @@ export function fromBrief(line: string, sources: (string | null | undefined)[]):
   return n.length > 0 && sources.some((s) => s && norm(s).includes(n))
 }
 
-export type ImageField = 'MARKETING_IMAGE' | 'SQUARE_MARKETING_IMAGE' | 'PORTRAIT_MARKETING_IMAGE' | 'LOGO' | 'LANDSCAPE_LOGO'
+export type ImageField = 'MARKETING_IMAGE' | 'SQUARE_MARKETING_IMAGE' | 'PORTRAIT_MARKETING_IMAGE' | 'VERTICAL_IMAGE' | 'LOGO' | 'LANDSCAPE_LOGO'
 
 // Saved on drafts; `file` is the name inside the images/ folder of the Editor package.
 export type ImageAsset = { attachment_id: string; name: string; file: string; width: number; height: number; ratio: string; field?: ImageField }
 
 // search: image assets of a Search ad group; pmax: asset group (logos too); dg: Demand Gen ad (square logo,
-// no landscape logo); video: YouTube campaigns (no images); display: responsive display ad (1.91:1, 1:1, logos).
-export type AssetMode = 'search' | 'pmax' | 'dg' | 'video' | 'display'
+// no landscape logo); video: YouTube campaigns (no images); display: responsive display ad (1.91:1, 1:1, logos);
+// meta: Facebook/Instagram ads (1:1, 4:5, 9:16, 1.91:1).
+export type AssetMode = 'search' | 'pmax' | 'dg' | 'video' | 'display' | 'meta'
 
 type Shape = { ratio: string; value: number; minW: number; minH: number; field: ImageField }
 
@@ -66,6 +67,13 @@ const MARKETING_SHAPES: Shape[] = [
   { ratio: '1:1', value: 1, minW: 300, minH: 300, field: 'SQUARE_MARKETING_IMAGE' },
   { ratio: '4:5', value: 0.8, minW: 480, minH: 600, field: 'PORTRAIT_MARKETING_IMAGE' },
 ]
+// Meta's recommended sizes for feed, stories/reels and link ads.
+const META_SHAPES: Shape[] = [
+  { ratio: '1:1', value: 1, minW: 600, minH: 600, field: 'SQUARE_MARKETING_IMAGE' },
+  { ratio: '4:5', value: 0.8, minW: 600, minH: 750, field: 'PORTRAIT_MARKETING_IMAGE' },
+  { ratio: '9:16', value: 0.5625, minW: 600, minH: 1067, field: 'VERTICAL_IMAGE' },
+  { ratio: '1.91:1', value: 1.91, minW: 600, minH: 314, field: 'MARKETING_IMAGE' },
+]
 const LANDSCAPE_LOGO: Shape = { ratio: '4:1', value: 4, minW: 512, minH: 128, field: 'LANDSCAPE_LOGO' }
 const LOGO_MIN = 128
 
@@ -73,12 +81,20 @@ export const FIELD_LABEL: Record<ImageField, string> = {
   MARKETING_IMAGE: 'horizontalna 1.91:1',
   SQUARE_MARKETING_IMAGE: 'kvadrat 1:1',
   PORTRAIT_MARKETING_IMAGE: 'vertikalna 4:5',
+  VERTICAL_IMAGE: 'story 9:16',
   LOGO: 'logo 1:1',
   LANDSCAPE_LOGO: 'logo 4:1',
 }
 
 export function checkImage(a: Attachment, w: number, h: number, mode: AssetMode): { ratio: string; field: ImageField } | { problem: string } {
   if (!/^image\/(jpeg|png|gif)$/.test(a.content_type ?? '')) return { problem: 'format nije JPG/PNG/GIF' }
+  if (mode === 'meta') {
+    if ((a.size_bytes ?? 0) > 30 * 1024 * 1024) return { problem: 'veće od 30 MB' }
+    const m = META_SHAPES.find((s) => Math.abs(w / h / s.value - 1) <= 0.02)
+    if (!m) return { problem: `${w}×${h} nije ${META_SHAPES.map((s) => s.ratio).join(', ')}` }
+    if (w < m.minW || h < m.minH) return { problem: `${w}×${h} je manje od ${m.minW}×${m.minH}` }
+    return { ratio: m.ratio, field: m.field }
+  }
   if ((a.size_bytes ?? 0) > 5 * 1024 * 1024) return { problem: 'veće od 5 MB' }
   // Responsive display ads take landscape and square images (no 4:5) and both logo shapes.
   const shapes = mode === 'pmax' ? [...MARKETING_SHAPES, LANDSCAPE_LOGO]
