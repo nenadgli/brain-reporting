@@ -2,7 +2,7 @@ import { createClient } from 'jsr:@supabase/supabase-js@2'
 import Anthropic from 'npm:@anthropic-ai/sdk'
 
 // Productive "akcija" briefs (via Feed Hub) → Search campaign drafts in the Nove kampanje form.
-// Actions: projects | briefs | refresh | attachments | file_urls | draft | draft_pmax | draft_demand_gen | draft_video | draft_display. Only agency users may call it.
+// Actions: projects | briefs | refresh | attachments | comments | file_urls | draft | draft_pmax | draft_demand_gen | draft_video | draft_display. Only agency users may call it.
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -169,6 +169,12 @@ Deno.serve(async (req: Request) => {
     if (action === 'attachments') {
       if (!/^\d+$/.test(String(body.task_id ?? ''))) return json({ error: 'task_id je obavezan' }, 400)
       return json(await feedhub({ action: 'attachments', task_id: String(body.task_id), sync: body.sync !== false }, 60000))
+    }
+
+    // Comments on the brief and its subtasks, subtask descriptions and links (approved copy, Google Sheets).
+    if (action === 'comments') {
+      if (!/^\d+$/.test(String(body.task_id ?? ''))) return json({ error: 'task_id je obavezan' }, 400)
+      return json(await feedhub({ action: 'comments', task_id: String(body.task_id) }, 60000))
     }
 
     // Fresh signed links for attachments saved in drafts (used when exporting the Editor package).
