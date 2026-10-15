@@ -11,12 +11,17 @@ const CORS = {
 }
 const json = (obj: unknown, status: number) => new Response(JSON.stringify(obj), { status, headers: { ...CORS, 'Content-Type': 'application/json' } })
 
-// Column names and values as in Google Ads Editor's export of the F&F BA account (2026-10-14).
+// Column names and values as in Google Ads Editor's exports of the F&F BA (2026-10-14) and F&F RS (2026-10-15) accounts.
+// New Search campaigns get the team's usual settings: Google search + Search Partners (no Display), the market's
+// country by presence, all languages, broad match off, the EU political ads declaration and the action's dates.
 // Image assets are not part of Editor's CSV (ads have no image columns); they travel in the
 // images/ folder of the package and are added in Editor by hand.
 const HEADLINES = Array.from({ length: 15 }, (_, i) => `Headline ${i + 1}`)
 const DESCRIPTIONS = Array.from({ length: 4 }, (_, i) => `Description ${i + 1}`)
-const HEADER = ['Campaign', 'Campaign Type', 'Budget', 'Budget type', 'Ad Group', 'Ad type', ...HEADLINES, ...DESCRIPTIONS, 'Final URL', 'Path 1', 'Path 2', 'Keyword', 'Criterion Type', 'Campaign Status', 'Ad Group Status', 'Status']
+const SETTINGS = ['Networks', 'EU political ads', 'Languages', 'Bid Strategy Type', 'Start Date', 'End Date', 'Broad match keywords', 'Targeting method', 'Exclusion method']
+const HEADER = ['Campaign', 'Campaign Type', 'Budget', 'Budget type', ...SETTINGS, 'Location', 'Ad Group', 'Ad type', ...HEADLINES, ...DESCRIPTIONS, 'Final URL', 'Path 1', 'Path 2', 'Keyword', 'Criterion Type', 'Campaign Status', 'Ad Group Status', 'Status']
+// Editor location names for the "(Mkt:XX;" part of Brain's campaign names.
+const COUNTRY: Record<string, string> = { RS: 'Serbia', HR: 'Croatia', BA: 'Bosnia and Herzegovina', ME: 'Montenegro', SI: 'Slovenia', AL: 'Albania', MK: 'North Macedonia', XK: 'Kosovo', DE: 'Germany' }
 const KIND_ORDER = ['campaign', 'ad_group', 'rsa', 'keyword', 'negative_keyword']
 
 function esc(v: unknown): string {
@@ -28,8 +33,15 @@ function rowsFor(d: Record<string, any>): Record<string, unknown>[] {
   const p = d.payload ?? {}
   const base: Record<string, unknown> = { Campaign: d.campaign_name, 'Ad Group': d.ad_group_name ?? '' }
   switch (d.kind) {
-    case 'campaign':
-      return [{ Campaign: d.campaign_name, 'Campaign Type': p.campaign_type ?? 'Search', Budget: p.daily_budget ?? '', 'Budget type': 'Daily', 'Campaign Status': 'Paused' }]
+    case 'campaign': {
+      const country = COUNTRY[String(d.campaign_name).match(/\(Mkt:([A-Z]{2})/)?.[1] ?? '']
+      return [{
+        Campaign: d.campaign_name, 'Campaign Type': p.campaign_type ?? 'Search', Budget: p.daily_budget ?? '', 'Budget type': 'Daily',
+        Networks: 'Google search;Search Partners', 'EU political ads': "Doesn't have EU political ads", Languages: 'All',
+        'Bid Strategy Type': 'Maximize conversion value', 'Start Date': p.start_date ?? '', 'End Date': p.end_date ?? '', 'Broad match keywords': 'Off',
+        'Targeting method': 'Location of presence', 'Exclusion method': 'Location of presence', 'Campaign Status': 'Paused',
+      }, ...(country ? [{ Campaign: d.campaign_name, Location: country }] : [])]
+    }
     case 'ad_group':
       return [{ ...base, 'Ad Group Status': 'Paused' }]
     case 'rsa': {

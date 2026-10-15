@@ -366,7 +366,7 @@ export default function CampaignBuilder() {
     const camp = campaignName
     const ag = adGroup.trim()
     const rows = [
-      { kind: 'campaign', campaign_name: camp, ad_group_name: null, payload: { campaign_type: 'Search', daily_budget: parseFloat(budget) } },
+      { kind: 'campaign', campaign_name: camp, ad_group_name: null, payload: { campaign_type: 'Search', daily_budget: parseFloat(budget), start_date: brief?.start_date ?? null, end_date: brief?.end_date ?? null } },
       { kind: 'ad_group', campaign_name: camp, ad_group_name: ag, payload: images.length ? { images } : {} },
       { kind: 'rsa', campaign_name: camp, ad_group_name: ag, payload: { headlines: hl, descriptions: ds, final_url: finalUrl.trim(), path1: path1.trim(), path2: path2.trim() } },
       ...kw.map((k) => ({ kind: 'keyword', campaign_name: camp, ad_group_name: ag, payload: k })),
