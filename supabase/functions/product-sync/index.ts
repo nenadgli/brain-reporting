@@ -126,7 +126,21 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // Replace the period for each source that was pulled.
+    // Meta goes to its own table; GA4 and Google Ads to product_daily. Each pulled source's period is replaced.
+    const metaRows = [...rows.values()].filter((r) => r.source === 'meta').map((r) => ({
+      client_id: r.client_id, report_date: r.report_date, market: r.market, item_id: r.item_id, impressions: r.impressions, clicks: r.clicks,
+      spend: Math.round(r.spend * 100) / 100, purchases: r.conversions, purchase_value: Math.round(r.conversion_value * 100) / 100,
+    }))
+    if (pulled.has('meta')) {
+      const { error } = await sb.from('product_daily_meta').delete().eq('client_id', clientId).in('market', markets).gte('report_date', from).lte('report_date', to)
+      if (error) throw error
+      for (let i = 0; i < metaRows.length; i += 1000) {
+        const { error: e } = await sb.from('product_daily_meta').insert(metaRows.slice(i, i + 1000))
+        if (e) throw e
+      }
+      pulled.delete('meta')
+      for (const k of [...rows.keys()]) if (k.startsWith('meta|')) rows.delete(k)
+    }
     for (const src of pulled) {
       const { error } = await sb.from('product_daily').delete().eq('client_id', clientId).eq('source', src).in('market', markets).gte('report_date', from).lte('report_date', to)
       if (error) throw error
@@ -136,7 +150,7 @@ Deno.serve(async (req: Request) => {
       const { error } = await sb.from('product_daily').insert(list.slice(i, i + 1000))
       if (error) throw error
     }
-    return json({ ok: true, ...out, stored: list.length })
+    return json({ ok: true, ...out, stored: list.length, stored_meta: metaRows.length })
   } catch (e) {
     return json({ error: (e as Error).message }, 500)
   }

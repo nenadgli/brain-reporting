@@ -109,9 +109,15 @@ export default function ProductFeeds() {
     if (!feedId) return
     const to = new Date(Date.now() - 864e5).toISOString().slice(0, 10)
     const from = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10)
-    supabase.rpc('product_performance', { p_feed_id: feedId, p_from: from, p_to: to }).then(({ data, error: e }) => {
+    Promise.all([
+      supabase.rpc('product_performance', { p_feed_id: feedId, p_from: from, p_to: to }),
+      supabase.rpc('product_meta_items', { p_feed_id: feedId, p_from: from, p_to: to }),
+    ]).then(([{ data, error: e }, { data: md }]) => {
       if (e) { setError(e.message); return }
-      setPerf(((data ?? []) as Perf[]).map((p) => ({ ...p, views: +p.views, add_to_cart: +p.add_to_cart, purchases: +p.purchases, revenue: +p.revenue, impressions: +p.impressions, clicks: +p.clicks, spend: +p.spend, conversions: +p.conversions, conversion_value: +p.conversion_value, meta_spend: +p.meta_spend, meta_purchases: +p.meta_purchases, meta_value: +p.meta_value })))
+      // Meta results come from their own table, matched by product id.
+      const meta = new Map(((md ?? []) as { item_id: string; spend: number; purchases: number; purchase_value: number }[]).map((m) => [m.item_id, m]))
+      setPerf(((data ?? []) as Perf[]).map((p) => ({ ...p, views: +p.views, add_to_cart: +p.add_to_cart, purchases: +p.purchases, revenue: +p.revenue, impressions: +p.impressions, clicks: +p.clicks, spend: +p.spend, conversions: +p.conversions, conversion_value: +p.conversion_value,
+        meta_spend: +(meta.get(p.item_id)?.spend ?? 0), meta_purchases: +(meta.get(p.item_id)?.purchases ?? 0), meta_value: +(meta.get(p.item_id)?.purchase_value ?? 0) })))
     })
   }, [feedId, days])
 
@@ -119,9 +125,14 @@ export default function ProductFeeds() {
     if (!feedId) return
     const to = new Date(Date.now() - 864e5).toISOString().slice(0, 10)
     const from = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10)
-    supabase.rpc('feed_segments', { p_feed_id: feedId, p_dim: dim, p_from: from, p_to: to }).then(({ data, error: e }) => {
+    Promise.all([
+      supabase.rpc('feed_segments', { p_feed_id: feedId, p_dim: dim, p_from: from, p_to: to }),
+      supabase.rpc('feed_segments_meta', { p_feed_id: feedId, p_dim: dim, p_from: from, p_to: to }),
+    ]).then(([{ data, error: e }, { data: md }]) => {
       if (e) { setError(e.message); return }
-      setSegs(((data ?? []) as Seg[]).map((x) => ({ ...x, revenue: +x.revenue, spend: +x.spend, purchases: +x.purchases, conversion_value: +x.conversion_value, views: +x.views, meta_spend: +x.meta_spend, meta_value: +x.meta_value })))
+      const meta = new Map(((md ?? []) as { value: string; spend: number; purchase_value: number }[]).map((m) => [m.value, m]))
+      setSegs(((data ?? []) as Seg[]).map((x) => ({ ...x, revenue: +x.revenue, spend: +x.spend, purchases: +x.purchases, conversion_value: +x.conversion_value, views: +x.views,
+        meta_spend: +(meta.get(x.value)?.spend ?? 0), meta_value: +(meta.get(x.value)?.purchase_value ?? 0) })))
     })
   }, [feedId, dim, days])
   useEffect(() => {
