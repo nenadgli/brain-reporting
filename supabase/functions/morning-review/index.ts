@@ -530,6 +530,81 @@ const WEEKLY_TYPES = ['ads_policy', 'recommendations', 'placements', 'ga4_tracki
 // Product and feed findings (clients with a product feed) come on top of the daily cap.
 const PRODUCT_TYPES = ['product_spend_no_sale', 'product_meta_no_sale', 'product_no_ads', 'product_gone_spending', 'product_price_drop', 'feed_wave']
 
+// The campaign group a campaign belongs to (review_settings.params.campaign_groups, first match wins).
+// mode: predlozi (findings and ready changes) | upozorenja (findings only) | ne_dirati (left out).
+type Group = { name: string | null; mode: string; network?: string; pattern?: string }
+function campaignGroup(params: Record<string, unknown>, network: string, campaign: string): Group {
+  for (const g of (params.campaign_groups ?? []) as Group[]) {
+    if (g.network && g.network !== network) continue
+    try { if (g.pattern && new RegExp(g.pattern).test(campaign)) return g } catch { /* a bad pattern never matches */ }
+  }
+  return { name: null, mode: 'predlozi' }
+}
+const reEscape = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const ACTIVE_CHANGE = ['predlog', 'odobreno', 'izvezeno', 'poslato']
+
+// Ready changes that follow the team's rules, after the review:
+// - competitors are never targeted: the competitor's name becomes one phrase negative in every campaign where a
+//   search term with it showed up in the last 30 days (whole words only, brands the client sells excluded);
+// - a whole-term negative is no longer needed once the competitor's name is a phrase negative in that campaign;
+// - campaigns whose group is "samo upozorenja" or "ne dirati" get no ready changes.
+// The heavy part is one LIKE query (competitor_search_terms); matching and grouping happen here.
+async function teamRuleChanges(clientId: string, params: Record<string, unknown>) {
+  const sold = new Set(((params.brands_sold ?? []) as string[]).map((b) => b.toLowerCase()))
+  const comps = [...new Set(((params.competitors ?? []) as string[]).map((c) => c.toLowerCase().trim()).filter((c) => c && !sold.has(c)))]
+  const wordRe = (w: string) => new RegExp(`(^|[^a-z0-9])${reEscape(w)}($|[^a-z0-9])`)
+  let added = 0
+  if (comps.length) {
+    const { data: rows, error } = await sb.rpc('competitor_search_terms', { p_client_id: clientId, p_names: comps, p_days: 30 })
+    if (error) throw error
+    const res = comps.map((c) => [c, wordRe(c)] as const)
+    const agg = new Map<string, { campaign: string; competitor: string; spend: number; clicks: number; terms: { term: string; spend: number }[] }>()
+    for (const r of (rows ?? []) as { campaign: string; term: string; spend: number; clicks: number }[]) {
+      if (campaignGroup(params, 'google', r.campaign).mode !== 'predlozi') continue
+      for (const [c, re] of res) {
+        if (!re.test(r.term)) continue
+        const k = `${r.campaign}|${c}`
+        const a = agg.get(k) ?? { campaign: r.campaign, competitor: c, spend: 0, clicks: 0, terms: [] }
+        a.spend += Number(r.spend) || 0
+        a.clicks += Number(r.clicks) || 0
+        a.terms.push({ term: r.term, spend: Number(r.spend) || 0 })
+        agg.set(k, a)
+      }
+    }
+    const { data: existing } = await sb.from('ppc_changes').select('fingerprint, status, decided_at').eq('client_id', clientId).eq('kind', 'negative_keyword')
+    const blocked = new Set((existing ?? []).filter((e) => ACTIVE_CHANGE.includes(e.status) || (e.status === 'odbijeno' && Date.parse(e.decided_at ?? '') > Date.now() - 90 * 864e5)).map((e) => e.fingerprint))
+    const fresh = [...agg.values()].filter((a) => !blocked.has(`neg:${a.campaign}:${a.competitor}`)).map((a) => {
+      const top = a.terms.sort((x, y) => y.spend - x.spend)
+      return {
+        client_id: clientId, task: 'search_terms', kind: 'negative_keyword', network: 'google', campaign: a.campaign,
+        target: a.competitor, match_type: 'Phrase',
+        reason: `Konkurent „${a.competitor}“: tim ne gađa konkurente · ${top.length} termina, potrošeno ${a.spend.toFixed(2)} za 30 dana, ${a.clicks} klikova`,
+        details: { spend: Math.round(a.spend * 100) / 100, clicks: a.clicks, terms: top.slice(0, 5).map((t) => t.term), kind: 'konkurent', source: 'lista_konkurenata' },
+        fingerprint: `neg:${a.campaign}:${a.competitor}`,
+      }
+    })
+    for (let i = 0; i < fresh.length; i += 200) {
+      const { error: insErr } = await sb.from('ppc_changes').insert(fresh.slice(i, i + 200))
+      if (insErr) throw insErr
+    }
+    added = fresh.length
+  }
+  // Clean up what is still only proposed.
+  const { data: open } = await sb.from('ppc_changes').select('id, kind, campaign, network, target, status, details').eq('client_id', clientId).in('status', ACTIVE_CHANGE)
+  const compNeg = (open ?? []).filter((c) => c.kind === 'negative_keyword' && (c.details as { source?: string })?.source === 'lista_konkurenata')
+  const replaced: string[] = []
+  const warnOnly: string[] = []
+  for (const c of (open ?? []).filter((x) => x.status === 'predlog')) {
+    if (c.campaign && campaignGroup(params, c.network, c.campaign).mode !== 'predlozi') { warnOnly.push(c.id); continue }
+    if (c.kind === 'negative_keyword' && (c.details as { source?: string })?.source !== 'lista_konkurenata'
+        && compNeg.some((p) => p.campaign === c.campaign && wordRe(String(p.target).toLowerCase()).test(String(c.target).toLowerCase()))) replaced.push(c.id)
+  }
+  const now = new Date().toISOString()
+  if (replaced.length) await sb.from('ppc_changes').update({ status: 'odbijeno', decided_at: now, comment: 'Automatski: zamenjeno negativnom rečju konkurenta (phrase) u istoj kampanji.' }).in('id', replaced)
+  if (warnOnly.length) await sb.from('ppc_changes').update({ status: 'odbijeno', decided_at: now, comment: 'Automatski: grupa kampanja je „samo upozorenja“ ili „ne dirati“, bez gotovih izmena.' }).in('id', warnOnly)
+  return { added, replaced: replaced.length, warn_only: warnOnly.length }
+}
+
 async function reviewClient(clientId: string, clientName: string, params: Record<string, unknown>, forceWeekly = false) {
   const runDate = today()
   const weekly = forceWeekly || new Date(runDate + 'T00:00:00Z').getUTCDay() === Number(params.weekly_weekday ?? 1)
@@ -671,11 +746,16 @@ async function reviewClient(clientId: string, clientName: string, params: Record
       })))
       if (insErr) throw insErr
     }
+    // The team's rules for ready changes; a failure here never fails the review itself.
+    let rules: unknown = null
+    if (params.competitors || params.campaign_groups) {
+      try { rules = await teamRuleChanges(clientId, params) } catch (e) { rules = { error: (e as Error).message } }
+    }
     await sb.from('review_runs').update({
       status: 'done', finished_at: new Date().toISOString(), data_date: dataDate || null,
       candidates: candidates.length, findings: findings.length, model: model || null,
     }).eq('id', run.id)
-    return { client: clientName, candidates: candidates.length, findings: findings.length, stale, weekly }
+    return { client: clientName, candidates: candidates.length, findings: findings.length, stale, weekly, rules }
   } catch (e) {
     await sb.from('review_runs').update({ status: 'failed', error: (e as Error).message, finished_at: new Date().toISOString() }).eq('id', run.id)
     throw e
