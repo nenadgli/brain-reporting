@@ -143,7 +143,9 @@ export default function CampaignBuilder() {
     supabase.functions.invoke('google-negatives', { body: { client_id: clientId } }).then(({ data, error }) => {
       if (cancelled) return
       if (error || data?.error) { setNegSourceError(data?.error ?? error?.message ?? 'nepoznata greška'); setNegSources([]); return }
-      setNegSources(data?.campaigns ?? [])
+      // Only campaigns with their own negatives; active ones and Search campaigns first.
+      const rank = (c: NegSource) => (c.status === 'ENABLED' ? 0 : 2) + (/Search/i.test(c.campaign) ? 0 : 1)
+      setNegSources(((data?.campaigns ?? []) as NegSource[]).filter((c) => c.negatives.length > 0).sort((x, y) => rank(x) - rank(y) || y.negatives.length - x.negatives.length))
     })
     return () => { cancelled = true }
   }, [clientId])
