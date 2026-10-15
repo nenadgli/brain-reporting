@@ -555,11 +555,17 @@ async function teamRuleChanges(clientId: string, params: Record<string, unknown>
   const wordRe = (w: string) => new RegExp(`(^|[^a-z0-9])${reEscape(w)}($|[^a-z0-9])`)
   let added = 0
   if (comps.length) {
-    const { data: rows, error } = await sb.rpc('competitor_search_terms', { p_client_id: clientId, p_names: comps, p_days: 30 })
-    if (error) throw error
+    // The API returns at most 1000 rows per call; the function's result is ordered, so it is read in pages.
+    const rows: { campaign: string; term: string; spend: number; clicks: number }[] = []
+    for (let from = 0; from < 50000; from += 1000) {
+      const { data, error } = await sb.rpc('competitor_search_terms', { p_client_id: clientId, p_names: comps, p_days: 30 }).range(from, from + 999)
+      if (error) throw error
+      rows.push(...((data ?? []) as typeof rows))
+      if ((data ?? []).length < 1000) break
+    }
     const res = comps.map((c) => [c, wordRe(c)] as const)
     const agg = new Map<string, { campaign: string; competitor: string; spend: number; clicks: number; terms: { term: string; spend: number }[] }>()
-    for (const r of (rows ?? []) as { campaign: string; term: string; spend: number; clicks: number }[]) {
+    for (const r of rows) {
       if (campaignGroup(params, 'google', r.campaign).mode !== 'predlozi') continue
       for (const [c, re] of res) {
         if (!re.test(r.term)) continue
