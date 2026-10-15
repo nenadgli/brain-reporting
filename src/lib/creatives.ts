@@ -31,6 +31,22 @@ export type Brief = {
   copy: string | null
   legal_line: string | null
   created_at: string
+  // Text of task comments in which someone approved something ("odobren"), oldest first.
+  approved_copy?: string[]
+}
+
+// A comment on the brief task or a subtask (read from Productive, nothing is written back).
+export type BriefComment = { id: string; task_id: string; task_title: string | null; from_subtask: boolean; author: string | null; created_at: string | null; text: string; links: string[] }
+
+export const isApproval = (text: string) => /odobren/i.test(text)
+// Google Sheets / Docs / Drive links; Productive avatar and file links are left out.
+export const docLinks = (links: string[]) => links.filter((l) => /^https:\/\/(docs|drive)\.google\.com\//.test(l))
+
+// Whether a generated line was taken from the brief or the approved comments ("iz briefa") or written new.
+const norm = (s: string) => s.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9%]+/g, ' ').trim()
+export function fromBrief(line: string, sources: (string | null | undefined)[]): boolean {
+  const n = norm(line)
+  return n.length > 0 && sources.some((s) => s && norm(s).includes(n))
 }
 
 export type ImageField = 'MARKETING_IMAGE' | 'SQUARE_MARKETING_IMAGE' | 'PORTRAIT_MARKETING_IMAGE' | 'LOGO' | 'LANDSCAPE_LOGO'

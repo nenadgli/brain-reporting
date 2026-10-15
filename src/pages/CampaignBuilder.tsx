@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { type AssetMode, type Attachment, type Brief, type ImageAsset, FIELD_LABEL, assetFileName, checkImage, downloadEditorPackage, imageSize } from '../lib/creatives'
+import { type AssetMode, type Attachment, type Brief, type BriefComment, type ImageAsset, FIELD_LABEL, assetFileName, checkImage, docLinks, downloadEditorPackage, fromBrief, imageSize, isApproval } from '../lib/creatives'
 import PmaxAssetGroupForm from './PmaxAssetGroupForm'
 import DemandGenAdGroupForm from './DemandGenAdGroupForm'
 import VideoCampaignForm from './VideoCampaignForm'
@@ -105,6 +105,9 @@ export default function CampaignBuilder() {
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [attLoading, setAttLoading] = useState(false)
   const [attError, setAttError] = useState('')
+  const [comments, setComments] = useState<BriefComment[]>([])
+  const [comLoading, setComLoading] = useState(false)
+  const [comError, setComError] = useState('')
   const [mode, setMode] = useState<AssetMode>('search')
   // Refreshing existing Search ads is its own screen, without briefs and images.
   const [refresh, setRefresh] = useState(false)
@@ -239,7 +242,38 @@ export default function CampaignBuilder() {
     })
   }
 
-  const brief = briefs.find((b) => b.task_id === briefId) ?? null
+  const rawBrief = briefs.find((b) => b.task_id === briefId) ?? null
+  // The brief as the copy writer sees it: description fields plus the comments in which something was approved.
+  const brief = useMemo<Brief | null>(() => (rawBrief ? { ...rawBrief, approved_copy: comments.filter((c) => isApproval(c.text)).map((c) => c.text) } : null), [rawBrief, comments])
+  const sheetLinks = useMemo(() => {
+    const m = new Map<string, { url: string; approved: boolean; author: string | null }>()
+    for (const c of comments) for (const url of docLinks(c.links)) {
+      const prev = m.get(url)
+      m.set(url, { url, approved: (prev?.approved ?? false) || isApproval(c.text), author: prev?.author ?? c.author })
+    }
+    return [...m.values()]
+  }, [comments])
+
+  // Comments on the brief and its subtasks: approved copy and sheet links often live there, not in the description.
+  useEffect(() => {
+    setComments([])
+    setComError('')
+    if (!briefId) return
+    let cancelled = false
+    setComLoading(true)
+    supabase.functions.invoke('productive-briefs', { body: { action: 'comments', task_id: briefId } }).then(({ data, error }) => {
+      if (cancelled) return
+      setComLoading(false)
+      if (error || data?.error) {
+        setComError(data?.error ?? error?.message ?? 'nepoznata greška')
+        return
+      }
+      setComments([...(data?.comments ?? []), ...((data?.subtasks ?? []) as { task_id: string; title: string | null; text: string | null; links: string[] }[])
+        .filter((t) => t.text)
+        .map((t) => ({ id: `sub-${t.task_id}`, task_id: t.task_id, task_title: t.title, from_subtask: true, author: null, created_at: null, text: `Opis podtaska: ${t.text}`, links: t.links }))])
+    })
+    return () => { cancelled = true }
+  }, [briefId])
 
   // Images, videos and files from the brief task and its subtasks; the first open copies them from Productive.
   useEffect(() => {
@@ -279,7 +313,12 @@ export default function CampaignBuilder() {
     setHeadlines((data.headlines ?? []).join('\n')); setDescriptions((data.descriptions ?? []).join('\n'))
     setKeywords((data.keywords ?? []).join('\n'))
     const period = brief.start_date ? ` Period akcije: ${shortDate(brief.start_date)}${brief.end_date && brief.end_date !== brief.start_date ? ` – ${shortDate(brief.end_date)}` : ''}; kampanju pusti i zaustavi u tom periodu.` : ''
-    setRationale(`Iz Productive briefa „${brief.title}“. ${data.rationale ?? ''}${period}` +
+    // Which lines were taken from the brief or approved comments and which ones Claude wrote new.
+    const sources = [brief.copy, brief.headline, brief.legal_line, brief.discount, brief.applies_to, ...(brief.approved_copy ?? [])]
+    const written = [...(data.headlines ?? []), ...(data.descriptions ?? [])] as string[]
+    const fresh = written.filter((l) => !fromBrief(l, sources))
+    const origin = written.length ? ` Iz briefa: ${written.length - fresh.length}, novo: ${fresh.length}${fresh.length ? ` (${fresh.map((l) => `„${l}“`).join(', ')})` : ''}.` : ''
+    setRationale(`Iz Productive briefa „${brief.title}“. ${data.rationale ?? ''}${period}${origin}` +
       (data.dropped_too_long?.length ? ` Izbačeno jer je predugo: ${data.dropped_too_long.length}.` : ''))
   }
 
@@ -499,6 +538,43 @@ export default function CampaignBuilder() {
               <a href={brief.task_url} target="_blank" rel="noreferrer" className="text-[var(--color-indigo-dark)] underline">Otvori task u Productive-u</a>
             </div>
           </dl>
+        )}
+        {brief && (
+          <div className="mt-5 border-t border-[var(--color-line)] pt-4">
+            <p className="mb-1 text-sm font-medium">Razgovor iz taska{comments.length ? ` · ${comments.length}` : ''}</p>
+            <p className="mb-3 text-xs text-[var(--color-ink-soft)]">
+              Komentari na brief i podtaskove, samo čitanje. Komentari u kojima piše „odobren“ su istaknuti i idu u nacrt kao odobreni copy (preuzima se doslovno, Claude dopisuje samo ono što fali).
+            </p>
+            {comLoading && <p className="text-xs text-[var(--color-ink-soft)]">Učitavam komentare iz Productive-a…</p>}
+            {comError && <p className="text-xs text-[var(--color-rust)]">Komentari nisu učitani: {comError}</p>}
+            {!comLoading && !comError && comments.length === 0 && <p className="text-xs text-[var(--color-ink-soft)]">Task nema komentara.</p>}
+            {sheetLinks.length > 0 && (
+              <div className="mb-3 flex flex-wrap gap-2">
+                {sheetLinks.map((l) => (
+                  <a key={l.url} href={l.url} target="_blank" rel="noreferrer"
+                    className={`rounded-full border px-3 py-1 text-xs ${l.approved ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-[var(--color-line)] text-[var(--color-ink-soft)]'}`}>
+                    {l.approved ? '✓ Odobren copy (sheet)' : 'Sheet / dokument'}{l.author ? ` · ${l.author}` : ''}
+                  </a>
+                ))}
+              </div>
+            )}
+            {comments.length > 0 && (
+              <ol className="max-h-80 space-y-2 overflow-y-auto pr-1">
+                {comments.map((c) => {
+                  const ok = isApproval(c.text)
+                  return (
+                    <li key={c.id} className={`rounded-lg border px-3 py-2 text-xs ${ok ? 'border-emerald-300 bg-emerald-50' : 'border-[var(--color-line)]'}`}>
+                      <p className="mb-1 text-[var(--color-ink-soft)]">
+                        {ok && <span className="mr-1 font-medium text-emerald-700">Odobreno ·</span>}
+                        {c.author ?? 'Podtask'}{c.from_subtask && c.task_title ? ` · ${c.task_title}` : ''}{c.created_at ? ` · ${new Date(c.created_at).toLocaleString('sr-RS', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' })}` : ''}
+                      </p>
+                      <p className="whitespace-pre-line">{c.text}</p>
+                    </li>
+                  )
+                })}
+              </ol>
+            )}
+          </div>
         )}
         {brief && (
           <div className="mt-5 border-t border-[var(--color-line)] pt-4">

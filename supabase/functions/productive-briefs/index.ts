@@ -105,13 +105,16 @@ function briefFacts(b: Record<string, unknown>) {
     dodaje_se_na_postojeci_popust: b.stacks_with_existing, odnosi_se_na: b.applies_to,
     iskljucuje: b.excludes, vazi_i_u_radnjama: b.in_stores, landing_page: b.landing_page,
     copy_iz_briefa: b.copy, legal_line: b.legal_line, napomena: b.intro,
+    // Comments on the task in which someone wrote "odobren" (the approved copy is often there, not in the description).
+    odobreno_u_komentarima: Array.isArray(b.approved_copy) && b.approved_copy.length ? b.approved_copy : undefined,
   }
 }
 
 const LANGUAGE_RULES =
   '- Piši na jeziku tržišta (RS srpski latinica; HR hrvatski; ME/BA ijekavica), u tonu copy-ja iz briefa.\n' +
   '- Koristi samo činjenice iz briefa: popust, na šta se odnosi, period, uslove. Ne izmišljaj cene, procente, brendove ni rokove.\n' +
-  '- Poštuj legal line: ako akcija isključuje brendove ili ima uslov (npr. minimalan račun), ne obećavaj ono što ne važi.\n'
+  '- Poštuj legal line: ako akcija isključuje brendove ili ima uslov (npr. minimalan račun), ne obećavaj ono što ne važi.\n' +
+  '- Ako brief ima copy ili odobreno_u_komentarima, preuzmi te rečenice i fraze doslovno (bez prepravljanja) gde staju u ograničenje znakova; novo piši samo za ono što nedostaje. Novija odobrenja važe pre starijih (npr. izmenjen legal line ili adresa radnje).\n'
 
 // deno-lint-ignore no-explicit-any
 async function structured(schema: unknown, system: string, prompt: string): Promise<{ out: any; model: string } | { error: string }> {
