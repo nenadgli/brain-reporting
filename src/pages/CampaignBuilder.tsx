@@ -173,6 +173,11 @@ export default function CampaignBuilder() {
   const hl = lines(headlines)
   const ds = lines(descriptions)
   const kw = lines(keywords).map(parseKeyword).filter((k) => k.keyword)
+  // Team convention for Search ad groups: "Patike (Tg:Varies;Ad:RSA)"; Tg is the keywords' match type, Varies when mixed.
+  // A name typed with its own "(Tg:…)" suffix is kept as is.
+  const matchTypes = [...new Set(kw.map((k) => k.match_type))]
+  const adGroupName = /\(Tg:[^)]*\)\s*$/.test(adGroup.trim()) ? adGroup.trim()
+    : adGroup.trim() ? `${adGroup.trim().replace(/\s+/g, ' ')} (Tg:${matchTypes.length === 1 ? matchTypes[0] : 'Varies'};Ad:RSA)` : ''
   const typedNeg: NegKw[] = lines(negatives).map(parseKeyword).filter((k) => k.keyword)
   const neg: NegKw[] = [...new Map([...typedNeg, ...(copied?.negatives ?? [])].map((k) => [`${k.match_type}|${k.keyword.toLowerCase()}`, k] as const)).values()]
 
@@ -387,7 +392,7 @@ export default function CampaignBuilder() {
     setBusy(true)
     setMessage(null)
     const camp = campaignName
-    const ag = adGroup.trim()
+    const ag = adGroupName
     const rows = [
       { kind: 'campaign', campaign_name: camp, ad_group_name: null, payload: { campaign_type: 'Search', daily_budget: parseFloat(budget), start_date: brief?.start_date ?? null, end_date: brief?.end_date ?? null, shared_sets: copied?.shared_sets ?? [], negatives_from: copied?.campaign ?? null } },
       { kind: 'ad_group', campaign_name: camp, ad_group_name: ag, payload: images.length ? { images } : {} },
@@ -739,8 +744,10 @@ export default function CampaignBuilder() {
           {rationale && <p className="md:col-span-4 rounded bg-[var(--color-indigo-soft)] px-4 py-2 text-xs text-[var(--color-indigo-dark)]">{rationale}</p>}
           <label><span className={labelCls}>Dnevni budžet (€)</span>
             <input value={budget} onChange={(e) => setBudget(e.target.value)} inputMode="decimal" className={inputCls} /></label>
-          <label className="md:col-span-3"><span className={labelCls}>Ad grupa</span>
-            <input value={adGroup} onChange={(e) => setAdGroup(e.target.value)} className={inputCls} /></label>
+          <label className="md:col-span-3"><span className={labelCls}>Ad grupa (tema; oznaka se dodaje sama)</span>
+            <input value={adGroup} onChange={(e) => setAdGroup(e.target.value)} placeholder="Patike" className={inputCls} />
+            {adGroupName && <span className="mt-1 block text-xs text-[var(--color-ink-soft)]">U nalogu: <b className="text-[var(--color-ink)]">{adGroupName}</b></span>}
+          </label>
           <label className="md:col-span-2"><span className={labelCls}>Final URL</span>
             <input value={finalUrl} onChange={(e) => setFinalUrl(e.target.value)} placeholder="https://…" className={inputCls} /></label>
           <label><span className={labelCls}>Path 1 ({counter(path1.length, MAX_PATH)})</span>

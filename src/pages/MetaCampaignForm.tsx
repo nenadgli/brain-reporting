@@ -84,6 +84,12 @@ export default function MetaCampaignForm({ client, market, brief, images, onSave
   const obj = OBJECTIVES.find((o) => o.key === objective)!
   const campaignName = `LFT19_${theme || 'Akcija'} (Mkt:${market || 'XX'};Ct:${obj.ct};Ph:${phase})`
 
+  // Team convention for Meta ad sets: "Akcija_20%_na_FW26(Mkt:RS;Tg:Broad)"; Tg:LP_Visitors when it targets custom audiences (remarketing).
+  function adsetNameOf(name: string, t: Targeting | null) {
+    const tg = (t?.custom_audiences as unknown[] | undefined)?.length ? 'LP_Visitors' : 'Broad'
+    return `${theme}_${clean(name)}(Mkt:${market || 'XX'};Tg:${tg})`
+  }
+
   function patch(key: string, p: Partial<AdSetForm>) {
     setAdsets((list) => list.map((a) => (a.key === key ? { ...a, ...p } : a)))
   }
@@ -127,7 +133,7 @@ export default function MetaCampaignForm({ client, market, brief, images, onSave
         const b = baseOf(a.base)
         const keep = geoEntries(b?.targeting ?? null).filter((e) => a.keep.includes(entryKey(e)))
         const targeting: Targeting = b?.targeting ? withGeo(b.targeting, keep) : { geo_locations: { countries: [market], location_types: ['home', 'recent'] } }
-        const adsetName = `${theme}_${clean(a.name)}(Tg:${b ? 'Base' : 'Broad'})`
+        const adsetName = adsetNameOf(a.name, targeting)
         const ad = (img: ImageAsset | null, i: number): MetaAd => ({
           name: `${theme}_${clean(a.name)}${img ? `_${img.ratio.replace(':', 'x')}` : ''}${i ? `_${i + 1}` : ''}(At:SI)`,
           primary_texts: lines(a.texts), headlines: lines(a.titles), description: a.description.trim(), cta: a.cta, link: link.trim(), image: img,
@@ -242,7 +248,9 @@ export default function MetaCampaignForm({ client, market, brief, images, onSave
             return (
               <div key={a.key} className="rounded-xl border border-[var(--color-line)] p-4">
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                  <label><span className={label}>Ad set {i + 1}: ime</span><input className="input w-full" value={a.name} onChange={(e) => patch(a.key, { name: e.target.value })} placeholder="Beograd" /></label>
+                  <label><span className={label}>Ad set {i + 1}: ime</span><input className="input w-full" value={a.name} onChange={(e) => patch(a.key, { name: e.target.value })} placeholder="Beograd" />
+                    {a.name.trim() && <span className="mt-1 block text-xs text-[var(--color-ink-soft)]">U nalogu: <b className="text-[var(--color-ink)]">{adsetNameOf(a.name, b?.targeting ?? null)}</b></span>}
+                  </label>
                   <label className="md:col-span-2"><span className={label}>Napomena za tekst (radnja, adresa, publika)</span><input className="input w-full" value={a.note} onChange={(e) => patch(a.key, { note: e.target.value })} placeholder="MOVEM Fashion Merkator, Beograd" /></label>
                   <label className="md:col-span-2"><span className={label}>Kopiraj ciljanje iz</span>
                     <select className="input w-full" value={a.base} onChange={(e) => pickBase(a.key, e.target.value)}>
