@@ -1,91 +1,98 @@
 @import "tailwindcss";
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
+/* Calm, modern palette: light surfaces, one accent, quiet borders. */
 :root {
-  --color-paper: #ffffff;
-  --color-ink: #0f172a;
-  --color-ink-soft: #64748b;
-  --color-line: #e2e8f0;
+  --color-paper: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-ink: #111827;
+  --color-ink-soft: #6b7280;
+  --color-line: #e5e7eb;
 
-  /* Primary brand teal — drives KPI panels, active states, chart lines */
-  --color-indigo: #0ea678;
-  --color-indigo-soft: #e3f7ef;
-  --color-indigo-dark: #0b7a5a;
+  /* Accent (variable names kept so existing pages pick it up) */
+  --color-indigo: #4f46e5;
+  --color-indigo-soft: #eef2ff;
+  --color-indigo-dark: #4338ca;
 
-  /* Secondary accent (kept var name for drop-in chart compatibility) */
-  --color-olive: #0f172a;
-  /* Alert / negative accent */
-  --color-rust: #e15b45;
-
-  --color-bar: #0f172a;
+  --color-olive: #111827;
+  --color-rust: #dc2626;
+  --color-bar: #ffffff;
 }
 
-* {
-  box-sizing: border-box;
-}
-
-html, body, #root {
-  height: 100%;
-}
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
 
 body {
   margin: 0;
   background: var(--color-paper);
   color: var(--color-ink);
-  font-family: 'Poppins', system-ui, sans-serif;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 14px;
   -webkit-font-smoothing: antialiased;
 }
 
+/* Headings: no heavy display face, just a clear semibold. */
 .font-display {
-  font-family: 'Poppins', system-ui, sans-serif;
-  font-weight: 800;
-  letter-spacing: -0.01em;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.02em;
 }
+h1.font-display { font-size: 1.6rem !important; line-height: 2rem; }
+h2.font-display { font-size: 1.1rem !important; }
 
-.font-mono {
-  font-family: 'IBM Plex Mono', ui-monospace, monospace;
-}
+.font-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 
-:focus-visible {
-  outline: 2px solid var(--color-indigo);
-  outline-offset: 2px;
-}
+:focus-visible { outline: 2px solid var(--color-indigo); outline-offset: 2px; }
 
-/* Solid color KPI panel — the "quarterly sales template" hero-metric look */
-.kpi-card {
-  background: var(--color-indigo);
-  color: #ffffff;
-  padding: 1.1rem 1.25rem;
-  border-radius: 10px;
-}
-.kpi-card .kpi-label {
-  font-family: 'IBM Plex Mono', ui-monospace, monospace;
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: rgba(255, 255, 255, 0.75);
-}
-.kpi-card .kpi-value {
-  font-family: 'Poppins', system-ui, sans-serif;
-  font-weight: 800;
-  font-size: 1.65rem;
-  margin-top: 0.2rem;
-  letter-spacing: -0.01em;
-}
-.kpi-card.kpi-dark {
-  background: var(--color-bar);
-}
-.kpi-grid {
-  display: grid;
-  gap: 0.75rem;
-}
-
-/* Section eyebrow labels on the plain white page background (page headers) —
-   distinct from .kpi-label, which is white text meant for the dark kpi-card. */
 .eyebrow-label {
-  font-family: 'IBM Plex Mono', ui-monospace, monospace;
   font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-weight: 500;
   color: var(--color-ink-soft);
 }
+
+/* Building blocks for the new screens. */
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.04);
+}
+.input {
+  border: 1px solid var(--color-line);
+  border-radius: 0.5rem;
+  background: #fff;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.875rem;
+}
+.btn-primary, .btn-secondary, .btn-ghost {
+  border-radius: 0.5rem;
+  padding: 0.4rem 0.85rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.btn-primary { background: var(--color-indigo); color: #fff; }
+.btn-primary:hover { background: var(--color-indigo-dark); }
+.btn-secondary { background: #fff; border: 1px solid var(--color-line); }
+.btn-secondary:hover { background: var(--color-paper); }
+.btn-ghost { color: var(--color-ink-soft); }
+.btn-ghost:hover { color: var(--color-ink); }
+.btn-primary:disabled, .btn-secondary:disabled, .btn-ghost:disabled { opacity: 0.45; }
+
+/* Older screens: softer corners and white panels on the grey page. */
+.rounded { border-radius: 0.5rem; }
+section.bg-white, article.bg-white, div.bg-white.border, table { border-radius: 0.6rem; }
+
+/* KPI tiles */
+.kpi-card {
+  background: var(--color-surface);
+  color: var(--color-ink);
+  border: 1px solid var(--color-line);
+  padding: 1rem 1.15rem;
+  border-radius: 0.75rem;
+}
+.kpi-card .kpi-label { font-size: 0.75rem; color: var(--color-ink-soft); }
+.kpi-card .kpi-value { font-weight: 600; font-size: 1.5rem; margin-top: 0.2rem; letter-spacing: -0.02em; }
+.kpi-card.kpi-dark { background: var(--color-indigo); color: #fff; border-color: transparent; }
+.kpi-card.kpi-dark .kpi-label { color: rgba(255, 255, 255, 0.8); }
+.kpi-grid { display: grid; gap: 0.75rem; }

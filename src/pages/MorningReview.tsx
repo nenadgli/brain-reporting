@@ -3,8 +3,8 @@ import { supabase } from '../lib/supabase'
 import { downloadText } from '../lib/creatives'
 import { logAction } from '../lib/ppcTasks'
 
-type Params = Record<string, unknown> & { currency?: string }
-type ClientOpt = { client_id: string; params: Params; clients: { name: string } | null }
+export type Params = Record<string, unknown> & { currency?: string }
+export type ClientOpt = { client_id: string; params: Params; clients: { name: string } | null }
 type Run = {
   id: string
   run_date: string
@@ -291,7 +291,7 @@ const NUM_FIELDS: [string, string][] = [
   ['cooldown_days', 'Odlučene stavke ne vraćati (dana)'],
 ]
 
-function SettingsPanel({ client, onSaved }: { client: ClientOpt; onSaved: (p: Params) => void }) {
+export function SettingsPanel({ client, onSaved }: { client: ClientOpt; onSaved: (p: Params) => void }) {
   const [draft, setDraft] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')

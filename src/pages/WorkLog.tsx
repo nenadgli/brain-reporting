@@ -7,7 +7,6 @@ import { TASKS, TASK_BY_KEY, type TaskKey } from '../lib/ppcTasks'
 
 type Entry = { at: string; client_id: string | null; client_name: string | null; task: TaskKey; action: string; detail: string | null; user_email: string | null }
 type Client = { id: string; name: string }
-type Closed = { id: string; client_name: string; task: TaskKey; created_at: string; user_email: string | null; n_findings: number; n_approved: number; n_rejected: number; n_postponed: number; n_open: number; comment: string; findings: { title: string; status: string; comment: string | null }[] }
 
 const ACTION_LABEL: Record<string, string> = {
   odobreno: 'odobreno', odbijeno: 'odbijeno', odlozeno: 'odloženo', izvrseno: 'urađeno',
@@ -31,7 +30,6 @@ export default function WorkLog() {
   const [clientId, setClientId] = useState('')
   const [clients, setClients] = useState<Client[]>([])
   const [entries, setEntries] = useState<Entry[]>([])
-  const [closed, setClosed] = useState<Closed[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -55,8 +53,6 @@ export default function WorkLog() {
       if (e) { setError(e.message); return }
       setEntries((data ?? []) as Entry[])
     })
-    supabase.rpc('ppc_task_reviews_list', { p_from: range.from, p_to: range.to, p_client_id: clientId || null })
-      .then(({ data }) => setClosed((data ?? []) as Closed[]))
   }, [range, clientId])
 
   // One task for one client on one day counts once toward time saved, however many clicks it took.
@@ -89,10 +85,9 @@ export default function WorkLog() {
     <div>
       <header className="mb-8 flex flex-wrap items-end justify-between gap-4 border-b border-[var(--color-line)] pb-6">
         <div>
-          <p className="eyebrow-label">Rad tima u Brain-u, po Productive taskovima</p>
-          <h1 className="font-display mt-1 text-4xl font-medium">Urađeno</h1>
+          <h1 className="font-display text-4xl font-medium">Istorija</h1>
           <p className="mt-2 max-w-xl text-sm text-[var(--color-ink-soft)]">
-            Odluke u jutarnjem i nedeljnom pregledu, uneti budžeti, nacrti kampanja i preuzeti Editor fajlovi. Procena vremena računa jedan task po klijentu po danu.
+            Šta je tim odlučio i uradio u Brain-u: odobrene i odbijene provere, izmene preuzete za Editor, budžeti i nacrti kampanja. Procena ušteđenog vremena računa jednu oblast po klijentu po danu.
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-3 text-sm">
@@ -125,35 +120,10 @@ export default function WorkLog() {
         ))}
       </section>
 
-      <section className="mb-10">
-        <h2 className="font-display mb-3 text-xl font-medium">Završeni taskovi ({closed.length})</h2>
-        <p className="mb-3 text-xs text-[var(--color-ink-soft)]">Task je završen kad neko iz tima prođe Brainovu analizu u „PPC taskovi“, odluči o nalazima i zatvori task komentarom.</p>
-        {!closed.length && <p className="rounded border border-dashed border-[var(--color-line)] bg-white p-4 text-sm text-[var(--color-ink-soft)]">U ovom periodu nijedan task nije završen u Brain-u.</p>}
-        <div className="space-y-2">
-          {closed.map((r) => (
-            <details key={r.id} className="rounded border border-[var(--color-line)] bg-white p-3 text-sm">
-              <summary className="cursor-pointer">
-                <span className="font-medium">{r.client_name}</span> · {TASK_BY_KEY[r.task]?.label ?? r.task}
-                <span className="ml-2 text-xs text-[var(--color-ink-soft)]">{fmtDay(r.created_at)} {fmtTime(r.created_at)} · {who(r.user_email)} · nalaza {r.n_findings}: odobreno {r.n_approved}, odbijeno {r.n_rejected}, odloženo {r.n_postponed}{r.n_open ? `, otvoreno ${r.n_open}` : ''}</span>
-                <span className="mt-1 block">„{r.comment}“</span>
-              </summary>
-              {r.findings.length > 0 && (
-                <ul className="mt-2 space-y-1 border-t border-[var(--color-line)] pt-2 text-xs">
-                  {r.findings.map((f, i) => (
-                    <li key={i}><span className="rounded bg-[var(--color-paper)] px-1.5">{ACTION_LABEL[f.status] ?? f.status}</span> {f.title}{f.comment ? <span className="text-[var(--color-ink-soft)]"> — „{f.comment}“</span> : null}</li>
-                  ))}
-                </ul>
-              )}
-            </details>
-          ))}
-        </div>
-      </section>
-
-      <h2 className="font-display mb-3 text-xl font-medium">Sav rad u Brain-u</h2>
       <section className="mb-10 overflow-x-auto rounded border border-[var(--color-line)] bg-white">
         <table className="w-full text-sm">
           <thead className="bg-[var(--color-paper)] text-left text-xs text-[var(--color-ink-soft)]">
-            <tr><th className="px-3 py-2">Productive task</th><th className="px-2 text-right">Akcija</th><th className="px-2 text-right">Taskova (klijent × dan)</th><th className="px-2 text-right">Procena</th><th className="px-2">Klijenti</th><th className="px-2">Ko</th></tr>
+            <tr><th className="px-3 py-2">Oblast</th><th className="px-2 text-right">Akcija</th><th className="px-2 text-right">Klijent × dan</th><th className="px-2 text-right">Procena</th><th className="px-2">Klijenti</th><th className="px-2">Ko</th></tr>
           </thead>
           <tbody>
             {summary.rows.map(({ task, s }) => (
