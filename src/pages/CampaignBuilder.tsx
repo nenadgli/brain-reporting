@@ -67,6 +67,9 @@ function lines(s: string): string[] {
 }
 
 // "[exact]" -> Exact, "\"phrase\"" or plain -> Phrase
+type NegKw = { keyword: string; match_type: 'Exact' | 'Phrase' | 'Broad' }
+type NegSource = { campaign: string; status: string | null; negatives: NegKw[]; shared_sets: string[] }
+
 function parseKeyword(raw: string): { keyword: string; match_type: 'Exact' | 'Phrase' } {
   const t = raw.trim()
   if (t.startsWith('[') && t.endsWith(']')) return { keyword: t.slice(1, -1).trim(), match_type: 'Exact' }
@@ -94,6 +97,10 @@ export default function CampaignBuilder() {
   const [descriptions, setDescriptions] = useState('')
   const [keywords, setKeywords] = useState('')
   const [negatives, setNegatives] = useState('')
+  // Negatives and shared negative lists copied from an existing campaign (Windsor), kept with their match types.
+  const [negSources, setNegSources] = useState<NegSource[] | null>(null)
+  const [negSourceError, setNegSourceError] = useState('')
+  const [copiedFrom, setCopiedFrom] = useState('')
   const [suggesting, setSuggesting] = useState(false)
   const [rationale, setRationale] = useState('')
   const [projects, setProjects] = useState<{ productive_id: string; name: string }[]>([])
@@ -129,6 +136,19 @@ export default function CampaignBuilder() {
     else setMarket('')
   }, [clientId, client?.ga4_store])
 
+  useEffect(() => {
+    setNegSources(null); setNegSourceError(''); setCopiedFrom('')
+    if (!clientId) return
+    let cancelled = false
+    supabase.functions.invoke('google-negatives', { body: { client_id: clientId } }).then(({ data, error }) => {
+      if (cancelled) return
+      if (error || data?.error) { setNegSourceError(data?.error ?? error?.message ?? 'nepoznata greška'); setNegSources([]); return }
+      setNegSources(data?.campaigns ?? [])
+    })
+    return () => { cancelled = true }
+  }, [clientId])
+  const copied = negSources?.find((c) => c.campaign === copiedFrom) ?? null
+
   async function loadDrafts() {
     if (!clientId) return
     const { data, error } = await supabase
@@ -151,7 +171,8 @@ export default function CampaignBuilder() {
   const hl = lines(headlines)
   const ds = lines(descriptions)
   const kw = lines(keywords).map(parseKeyword).filter((k) => k.keyword)
-  const neg = lines(negatives).map(parseKeyword).filter((k) => k.keyword)
+  const typedNeg: NegKw[] = lines(negatives).map(parseKeyword).filter((k) => k.keyword)
+  const neg: NegKw[] = [...new Map([...typedNeg, ...(copied?.negatives ?? [])].map((k) => [`${k.match_type}|${k.keyword.toLowerCase()}`, k] as const)).values()]
 
   const problems: string[] = []
   if (!name.trim()) problems.push('Unesi naziv kampanje.')
@@ -366,7 +387,7 @@ export default function CampaignBuilder() {
     const camp = campaignName
     const ag = adGroup.trim()
     const rows = [
-      { kind: 'campaign', campaign_name: camp, ad_group_name: null, payload: { campaign_type: 'Search', daily_budget: parseFloat(budget), start_date: brief?.start_date ?? null, end_date: brief?.end_date ?? null } },
+      { kind: 'campaign', campaign_name: camp, ad_group_name: null, payload: { campaign_type: 'Search', daily_budget: parseFloat(budget), start_date: brief?.start_date ?? null, end_date: brief?.end_date ?? null, shared_sets: copied?.shared_sets ?? [], negatives_from: copied?.campaign ?? null } },
       { kind: 'ad_group', campaign_name: camp, ad_group_name: ag, payload: images.length ? { images } : {} },
       { kind: 'rsa', campaign_name: camp, ad_group_name: ag, payload: { headlines: hl, descriptions: ds, final_url: finalUrl.trim(), path1: path1.trim(), path2: path2.trim() } },
       ...kw.map((k) => ({ kind: 'keyword', campaign_name: camp, ad_group_name: ag, payload: k })),
@@ -380,7 +401,7 @@ export default function CampaignBuilder() {
     }
     setMessage({ kind: 'ok', text: `Nacrt sačuvan (${rows.length} redova${images.length ? `, ${images.length} slika` : ''}). Sve se izvozi kao Paused.` })
     setImages([])
-    setName(''); setAdGroup(''); setHeadlines(''); setDescriptions(''); setKeywords(''); setNegatives('')
+    setName(''); setAdGroup(''); setHeadlines(''); setDescriptions(''); setKeywords(''); setNegatives(''); setCopiedFrom('')
     loadDrafts()
   }
 
@@ -734,7 +755,29 @@ export default function CampaignBuilder() {
           </label>
           <label className="md:col-span-2"><span className={labelCls}>Ključne reči, jedna po redu — <code>[exact]</code>, <code>"phrase"</code> ili bez navodnika (= phrase) · {kw.length}</span>
             <textarea value={keywords} onChange={(e) => setKeywords(e.target.value)} rows={6} className={inputCls} /></label>
-          <label className="md:col-span-2"><span className={labelCls}>Negativne ključne reči (nivo kampanje), isti format · {neg.length}</span>
+          <div className="md:col-span-2 rounded-lg border border-[var(--color-line)] p-3">
+            <label className="block"><span className={labelCls}>Kopiraj negativne ključne reči iz postojeće kampanje (brend, konkurencija, deljene liste)</span>
+              <select value={copiedFrom} onChange={(e) => setCopiedFrom(e.target.value)} disabled={!negSources?.length} className={inputCls}>
+                <option value="">{negSources == null ? 'Učitavam iz Windsora…' : negSources.length ? '— bez kopiranja —' : negSourceError ? `Nije učitano: ${negSourceError}` : 'Nalog nema negativnih na nivou kampanje'}</option>
+                {(negSources ?? []).map((c) => (
+                  <option key={c.campaign} value={c.campaign}>{`${c.campaign} · ${c.negatives.length} negativnih${c.shared_sets.length ? ` · liste: ${c.shared_sets.join(', ')}` : ''}`}</option>
+                ))}
+              </select>
+            </label>
+            {copied && (
+              <details className="mt-2 text-xs">
+                <summary className="cursor-pointer">
+                  Kopirano iz „{copied.campaign}“: {(['Phrase', 'Exact', 'Broad'] as const).map((m) => `${copied.negatives.filter((k) => k.match_type === m).length} ${m.toLowerCase()}`).join(', ')}
+                  {copied.shared_sets.length > 0 && <> + deljene liste {copied.shared_sets.map((s) => `„${s}“`).join(', ')} (kampanja se samo kači na njih)</>}
+                  {' · '}<button type="button" className="underline" onClick={(e) => { e.preventDefault(); setCopiedFrom('') }}>ukloni</button>
+                </summary>
+                <p className="mt-2 max-h-40 overflow-y-auto leading-relaxed text-[var(--color-ink-soft)]">
+                  {copied.negatives.map((k) => (k.match_type === 'Exact' ? `[${k.keyword}]` : k.match_type === 'Phrase' ? `"${k.keyword}"` : k.keyword)).join(' · ')}
+                </p>
+              </details>
+            )}
+          </div>
+          <label className="md:col-span-2"><span className={labelCls}>Dodatne negativne ključne reči (nivo kampanje), isti format kao ključne reči · ukupno {neg.length}</span>
             <textarea value={negatives} onChange={(e) => setNegatives(e.target.value)} rows={6} className={inputCls} /></label>
         </div>
         {problems.length > 0 && name.trim() !== '' && (

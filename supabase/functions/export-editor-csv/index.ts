@@ -19,7 +19,7 @@ const json = (obj: unknown, status: number) => new Response(JSON.stringify(obj),
 const HEADLINES = Array.from({ length: 15 }, (_, i) => `Headline ${i + 1}`)
 const DESCRIPTIONS = Array.from({ length: 4 }, (_, i) => `Description ${i + 1}`)
 const SETTINGS = ['Networks', 'EU political ads', 'Languages', 'Bid Strategy Type', 'Start Date', 'End Date', 'Broad match keywords', 'Targeting method', 'Exclusion method']
-const HEADER = ['Campaign', 'Campaign Type', 'Budget', 'Budget type', ...SETTINGS, 'Location', 'Ad Group', 'Ad type', ...HEADLINES, ...DESCRIPTIONS, 'Final URL', 'Path 1', 'Path 2', 'Keyword', 'Criterion Type', 'Campaign Status', 'Ad Group Status', 'Status']
+const HEADER = ['Campaign', 'Campaign Type', 'Budget', 'Budget type', ...SETTINGS, 'Location', 'Ad Group', 'Ad type', ...HEADLINES, ...DESCRIPTIONS, 'Final URL', 'Path 1', 'Path 2', 'Keyword', 'Criterion Type', 'Shared set name', 'Shared set type', 'Campaign Status', 'Ad Group Status', 'Status']
 // Editor location names for the "(Mkt:XX;" part of Brain's campaign names.
 const COUNTRY: Record<string, string> = { RS: 'Serbia', HR: 'Croatia', BA: 'Bosnia and Herzegovina', ME: 'Montenegro', SI: 'Slovenia', AL: 'Albania', MK: 'North Macedonia', XK: 'Kosovo', DE: 'Germany' }
 const KIND_ORDER = ['campaign', 'ad_group', 'rsa', 'keyword', 'negative_keyword']
@@ -40,7 +40,9 @@ function rowsFor(d: Record<string, any>): Record<string, unknown>[] {
         Networks: 'Google search;Search Partners', 'EU political ads': "Doesn't have EU political ads", Languages: 'All',
         'Bid Strategy Type': 'Maximize conversion value', 'Start Date': p.start_date ?? '', 'End Date': p.end_date ?? '', 'Broad match keywords': 'Off',
         'Targeting method': 'Location of presence', 'Exclusion method': 'Location of presence', 'Campaign Status': 'Paused',
-      }, ...(country ? [{ Campaign: d.campaign_name, Location: country }] : [])]
+      }, ...(country ? [{ Campaign: d.campaign_name, Location: country }] : []),
+      // Existing shared negative lists the campaign is attached to (copied from another campaign); the list itself is not changed.
+      ...((p.shared_sets ?? []) as string[]).map((name) => ({ Campaign: d.campaign_name, 'Shared set name': name, 'Shared set type': 'Shared negative keyword list', Status: 'Enabled' }))]
     }
     case 'ad_group':
       return [{ ...base, 'Ad Group Status': 'Paused' }]
