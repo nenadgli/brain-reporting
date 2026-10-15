@@ -11,13 +11,21 @@ type Item = { item_id: string; title: string | null; price: number | null; sale_
 type Perf = {
   item_id: string; title: string | null; category: string | null; link: string | null; price: number | null; sale_price: number | null; in_feed: boolean
   views: number; add_to_cart: number; purchases: number; revenue: number; impressions: number; clicks: number; spend: number; conversions: number; conversion_value: number
+  meta_spend: number; meta_purchases: number; meta_value: number
   last_change_kind: string | null; last_change_at: string | null; last_change_old: string | null; last_change_new: string | null
 }
 // Signals worth a look; thresholds are deliberately simple and shown on screen.
 type Seg = {
   value: string; items: number; items_start: number | null; on_sale: number; on_sale_start: number | null; avg_price: number | null; avg_effective_price: number | null
   avg_discount_pct: number | null; avg_discount_start: number | null; max_discount_pct: number | null; new_items: number; removed_items: number; price_changes: number
-  views: number; add_to_cart: number; purchases: number; revenue: number; clicks: number; spend: number; conversion_value: number; start_day: string | null; end_day: string | null
+  views: number; add_to_cart: number; purchases: number; revenue: number; clicks: number; spend: number; conversion_value: number; meta_spend: number; meta_value: number; start_day: string | null; end_day: string | null
+}
+type Sum = { day: string; value: string; kind: string; n: number; avg_pct: number | null; items: { item_id: string; title: string | null; old: string | null; new: string | null; pct: number | null }[] }
+// How each kind of change reads in the summary.
+const SUM_LABEL: Record<string, (n: number) => string> = {
+  price_down: (n) => `${n} pojeftinilo`, price_up: (n) => `${n} poskupelo`, sale_start: (n) => `${n} stavljeno na akciju`,
+  sale_end: (n) => `${n} skinuto sa akcije`, new: (n) => `${n} ubačeno`, removed: (n) => `${n} izbačeno (nema na stanju)`,
+  back: (n) => `${n} vraćeno`, title: (n) => `${n} promenjen naslov`, label: (n) => `${n} promenjen label`, availability: (n) => `${n} promenjena dostupnost`,
 }
 const DIMS: [string, string][] = [
   ['category', 'Kategorija'], ['price', 'Cenovni razred (cena koju kupac plaća)'], ['discount', 'Popust'], ['sale', 'Akcija / puna cena'],
@@ -58,6 +66,7 @@ export default function ProductFeeds() {
   const [tab, setTab] = useState<'segments' | 'perf' | 'changes'>('segments')
   const [dim, setDim] = useState('category')
   const [segs, setSegs] = useState<Seg[]>([])
+  const [sums, setSums] = useState<Sum[]>([])
   const [days, setDays] = useState(30)
   const [perf, setPerf] = useState<Perf[]>([])
   const [flag, setFlag] = useState('')
@@ -102,7 +111,7 @@ export default function ProductFeeds() {
     const from = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10)
     supabase.rpc('product_performance', { p_feed_id: feedId, p_from: from, p_to: to }).then(({ data, error: e }) => {
       if (e) { setError(e.message); return }
-      setPerf(((data ?? []) as Perf[]).map((p) => ({ ...p, views: +p.views, add_to_cart: +p.add_to_cart, purchases: +p.purchases, revenue: +p.revenue, impressions: +p.impressions, clicks: +p.clicks, spend: +p.spend, conversions: +p.conversions, conversion_value: +p.conversion_value })))
+      setPerf(((data ?? []) as Perf[]).map((p) => ({ ...p, views: +p.views, add_to_cart: +p.add_to_cart, purchases: +p.purchases, revenue: +p.revenue, impressions: +p.impressions, clicks: +p.clicks, spend: +p.spend, conversions: +p.conversions, conversion_value: +p.conversion_value, meta_spend: +p.meta_spend, meta_purchases: +p.meta_purchases, meta_value: +p.meta_value })))
     })
   }, [feedId, days])
 
@@ -112,9 +121,27 @@ export default function ProductFeeds() {
     const from = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10)
     supabase.rpc('feed_segments', { p_feed_id: feedId, p_dim: dim, p_from: from, p_to: to }).then(({ data, error: e }) => {
       if (e) { setError(e.message); return }
-      setSegs(((data ?? []) as Seg[]).map((x) => ({ ...x, revenue: +x.revenue, spend: +x.spend, purchases: +x.purchases, conversion_value: +x.conversion_value, views: +x.views })))
+      setSegs(((data ?? []) as Seg[]).map((x) => ({ ...x, revenue: +x.revenue, spend: +x.spend, purchases: +x.purchases, conversion_value: +x.conversion_value, views: +x.views, meta_spend: +x.meta_spend, meta_value: +x.meta_value })))
     })
   }, [feedId, dim, days])
+  useEffect(() => {
+    if (!feedId || tab !== 'changes') return
+    const to = new Date().toISOString().slice(0, 10)
+    const from = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10)
+    supabase.rpc('feed_change_summary', { p_feed_id: feedId, p_dim: dim, p_from: from, p_to: to }).then(({ data, error: e }) => {
+      if (e) { setError(e.message); return }
+      setSums((data ?? []) as Sum[])
+    })
+  }, [feedId, dim, days, tab])
+  const sumDays = useMemo(() => {
+    const m = new Map<string, Map<string, Sum[]>>()
+    for (const x of sums) {
+      const d = m.get(x.day) ?? new Map<string, Sum[]>()
+      d.set(x.value, [...(d.get(x.value) ?? []), x])
+      m.set(x.day, d)
+    }
+    return [...m.entries()].map(([day, segsOfDay]) => ({ day, segs: [...segsOfDay.entries()].sort((a, b) => b[1].reduce((t, x) => t + x.n, 0) - a[1].reduce((t, x) => t + x.n, 0)) }))
+  }, [sums])
   const segTotals = useMemo(() => segs.reduce((t, x) => ({ items: t.items + x.items, revenue: t.revenue + x.revenue, spend: t.spend + x.spend }), { items: 0, revenue: 0, spend: 0 }), [segs])
 
   const perfShown = useMemo(() => {
@@ -197,7 +224,8 @@ export default function ProductFeeds() {
                     <th className="px-2 text-right">Proizvoda</th><th className="px-2 text-right">Na akciji</th><th className="px-2 text-right">Prosečan popust</th>
                     <th className="px-2 text-right">Prosečna cena</th><th className="px-2 text-right">Novi / nestali</th><th className="px-2 text-right">Promene cene</th>
                     <th className="px-2 text-right">Kupovine</th><th className="px-2 text-right">Prihod GA4</th><th className="px-2 text-right">Udeo prihoda</th>
-                    <th className="px-2 text-right">Trošak Ads</th><th className="px-2 text-right">Udeo troška</th><th className="px-2 text-right">ROAS Ads</th>
+                    <th className="px-2 text-right">Trošak Google</th><th className="px-2 text-right">Udeo troška Google</th><th className="px-2 text-right">ROAS Google</th>
+                    <th className="px-2 text-right">Trošak Meta</th><th className="px-2 text-right">ROAS Meta</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -220,10 +248,12 @@ export default function ProductFeeds() {
                         <td className="px-2 text-right">{n0(x.spend)}</td>
                         <td className={`px-2 text-right ${spendShare > revShare * 1.5 && spendShare >= 5 ? 'text-[var(--color-rust)]' : revShare > spendShare * 1.5 && revShare >= 5 ? 'text-[var(--color-indigo-dark)]' : ''}`}>{spendShare ? `${Math.round(spendShare)}%` : '—'}</td>
                         <td className="px-2 text-right">{x.spend > 0 ? (x.conversion_value / x.spend).toFixed(1) : '—'}</td>
+                        <td className="px-2 text-right">{n0(x.meta_spend)}</td>
+                        <td className="px-2 text-right">{x.meta_spend > 0 ? (x.meta_value / x.meta_spend).toFixed(1) : '—'}</td>
                       </tr>
                     )
                   })}
-                  {!segs.length && <tr><td colSpan={13} className="px-3 py-4 text-sm text-[var(--color-ink-soft)]">Nema podataka po segmentima (snimak segmenata se pravi posle prve sledeće provere feeda).</td></tr>}
+                  {!segs.length && <tr><td colSpan={15} className="px-3 py-4 text-sm text-[var(--color-ink-soft)]">Nema podataka po segmentima (snimak segmenata se pravi posle prve sledeće provere feeda).</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -250,10 +280,10 @@ export default function ProductFeeds() {
                 <thead className="bg-[var(--color-paper)] text-left text-[var(--color-ink-soft)]">
                   <tr>
                     <th className="px-3 py-2">Proizvod</th><th className="px-2 text-right">Cena</th>
-                    {([['views', 'Pregledi'], ['add_to_cart', 'Korpa'], ['purchases', 'Kupovine'], ['revenue', 'Prihod GA4'], ['clicks', 'Klikovi'], ['spend', 'Trošak'], ['conversion_value', 'Vrednost Ads']] as [keyof Perf, string][]).map(([k, l]) => (
+                    {([['views', 'Pregledi'], ['add_to_cart', 'Korpa'], ['purchases', 'Kupovine'], ['revenue', 'Prihod GA4'], ['clicks', 'Klikovi'], ['spend', 'Trošak Google'], ['conversion_value', 'Vrednost Google'], ['meta_spend', 'Trošak Meta'], ['meta_value', 'Vrednost Meta']] as [keyof Perf, string][]).map(([k, l]) => (
                       <th key={k} className="cursor-pointer px-2 text-right" onClick={() => setSort(k)}>{l}{sort === k ? ' ↓' : ''}</th>
                     ))}
-                    <th className="px-2 text-right">ROAS Ads</th><th className="px-2">Poslednja promena u feedu</th>
+                    <th className="px-2 text-right">ROAS Google</th><th className="px-2">Poslednja promena u feedu</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -273,11 +303,13 @@ export default function ProductFeeds() {
                       <td className="px-2 text-right">{n0(p.clicks)}</td>
                       <td className="px-2 text-right">{n0(p.spend)}</td>
                       <td className="px-2 text-right">{n0(p.conversion_value)}</td>
+                      <td className="px-2 text-right">{n0(p.meta_spend)}</td>
+                      <td className="px-2 text-right">{n0(p.meta_value)}</td>
                       <td className="px-2 text-right">{p.spend > 0 ? (p.conversion_value / p.spend).toFixed(1) : '—'}</td>
                       <td className="px-2 whitespace-nowrap">{p.last_change_kind ? <><span className={`rounded px-1 ${KIND[p.last_change_kind]?.cls ?? ''}`}>{KIND[p.last_change_kind]?.label ?? p.last_change_kind}</span> {p.last_change_at ? when(p.last_change_at) : ''}</> : ''}</td>
                     </tr>
                   ))}
-                  {!perfShown.length && <tr><td colSpan={11} className="px-3 py-4 text-sm text-[var(--color-ink-soft)]">Nema podataka za ovaj izbor.</td></tr>}
+                  {!perfShown.length && <tr><td colSpan={13} className="px-3 py-4 text-sm text-[var(--color-ink-soft)]">Nema podataka za ovaj izbor.</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -286,6 +318,51 @@ export default function ProductFeeds() {
           )}
 
           {tab === 'changes' && <>
+          <section className="mb-10">
+            <div className="mb-3 flex flex-wrap items-center gap-3">
+              <h2 className="font-display text-xl font-medium">Šta se promenilo</h2>
+              <select value={dim} onChange={(e) => setDim(e.target.value)} className={inputCls}>
+                {DIMS.map(([k, l]) => <option key={k} value={k}>po: {l}</option>)}
+              </select>
+              <select value={days} onChange={(e) => setDays(Number(e.target.value))} className={inputCls}>
+                {[7, 14, 30].map((d) => <option key={d} value={d}>poslednjih {d} dana</option>)}
+              </select>
+            </div>
+            {!sumDays.length && <p className="rounded border border-dashed border-[var(--color-line)] bg-white p-4 text-sm text-[var(--color-ink-soft)]">U ovom periodu feed se nije menjao (ili još nema dve provere za poređenje).</p>}
+            <div className="space-y-4">
+              {sumDays.map(({ day, segs: ss }) => (
+                <div key={day} className="rounded border border-[var(--color-line)] bg-white p-3">
+                  <p className="mb-2 text-sm font-medium">{new Date(day + 'T00:00:00').toLocaleDateString('sr-Latn-RS', { weekday: 'long', day: 'numeric', month: 'numeric' })}</p>
+                  <ul className="space-y-1 text-sm">
+                    {ss.map(([value, list]) => (
+                      <li key={value}>
+                        <details>
+                          <summary className="cursor-pointer">
+                            <span className="font-medium">{value}:</span>{' '}
+                            {list.map((x) => `${(SUM_LABEL[x.kind] ?? ((n: number) => `${n} ${x.kind}`))(x.n)}${x.avg_pct != null && ['price_down', 'price_up', 'sale_start', 'sale_end'].includes(x.kind) ? ` (${x.avg_pct > 0 ? '+' : ''}${x.avg_pct}% prosečno)` : ''}`).join(', ')}
+                          </summary>
+                          <table className="mt-1 mb-2 w-full text-xs">
+                            <tbody>
+                              {list.flatMap((x) => x.items.slice(0, 50).map((i) => (
+                                <tr key={x.kind + i.item_id} className="border-t border-[var(--color-line)]">
+                                  <td className="py-0.5 pr-3"><span className={`rounded px-1 ${KIND[x.kind]?.cls ?? ''}`}>{KIND[x.kind]?.label ?? x.kind}</span></td>
+                                  <td className="pr-3">{i.title ?? i.item_id} <span className="text-[var(--color-ink-soft)]">{i.item_id}</span></td>
+                                  <td className="pr-3 text-right whitespace-nowrap">{i.old ?? ''}{i.old && i.new ? ' → ' : ''}{i.new ?? ''}</td>
+                                  <td className="text-right">{i.pct != null ? `${i.pct > 0 ? '+' : ''}${i.pct}%` : ''}</td>
+                                </tr>
+                              )))}
+                            </tbody>
+                          </table>
+                        </details>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <h2 className="font-display mb-3 text-xl font-medium">Provere feeda</h2>
           <section className="mb-10 overflow-x-auto rounded border border-[var(--color-line)] bg-white">
             <table className="w-full text-xs">
               <thead className="bg-[var(--color-paper)] text-left text-[var(--color-ink-soft)]">

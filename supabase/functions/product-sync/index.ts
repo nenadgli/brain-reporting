@@ -3,7 +3,10 @@ import { createClient } from 'jsr:@supabase/supabase-js@2'
 // Podaci po proizvodu, per day, for the markets a client has a product feed for:
 // - GA4 items: views, add to cart, purchases, revenue (by country);
 // - Google Ads products (Shopping and PMax): impressions, clicks, cost, conversions, value (by the
-//   product's target country).
+//   product's target country);
+// - Meta catalog ads per product: impressions, clicks, cost, purchases, purchase value. Meta returns the
+//   product as "ID, title" with the title in the market's language; a row belongs to the feed whose
+//   product has that id and title.
 // The requested period is replaced as a whole, so a re-run never double counts. Read-only against Windsor.
 
 const WINDSOR_API_KEY = Deno.env.get('WINDSOR_API_KEY')!
@@ -30,7 +33,7 @@ async function windsor(connector: string, account: string, fields: string, from:
 const accountOf = (id: string) => (id.includes('__') ? id.split('__')[1] : id)
 
 type Row = {
-  client_id: string; source: 'ga4' | 'google_ads'; report_date: string; market: string; item_id: string; campaign_type: string
+  client_id: string; source: 'ga4' | 'google_ads' | 'meta'; report_date: string; market: string; item_id: string; campaign_type: string
   views: number; add_to_cart: number; purchases: number; revenue: number
   impressions: number; clicks: number; spend: number; conversions: number; conversion_value: number
 }
@@ -51,7 +54,7 @@ Deno.serve(async (req: Request) => {
     const byGeo = new Map(markets.map((m) => [`geoTargetConstants/${MARKETS[m].geo}`, m]))
 
     const { data: sources } = await sb.from('data_sources').select('provider, windsor_connection_id')
-      .eq('client_id', clientId).in('provider', ['ga4', 'google_ads']).not('windsor_connection_id', 'is', null)
+      .eq('client_id', clientId).in('provider', ['ga4', 'google_ads', 'facebook']).not('windsor_connection_id', 'is', null)
     const out: Record<string, unknown> = { from, to, markets }
     const rows = new Map<string, Row>()
     const blank = (source: Row['source'], d: string, market: string, item: string, ct: string): Row => ({
@@ -76,6 +79,34 @@ Deno.serve(async (req: Request) => {
         }
         out.ga4 = { rows: data.length, kept: n }
         pulled.add('ga4')
+      } else if (s.provider === 'facebook') {
+        // id|title (lower case) -> market, from the client's feeds.
+        const titles = new Map<string, string>()
+        const { data: fs } = await sb.from('product_feeds').select('id, market').eq('client_id', clientId).eq('enabled', true)
+        for (const f of fs ?? []) {
+          for (let off = 0; ; off += 1000) {
+            const { data: its } = await sb.from('feed_items').select('item_id, title').eq('feed_id', f.id).order('item_id').range(off, off + 999)
+            for (const it of its ?? []) if (it.title) titles.set(`${it.item_id}|${String(it.title).trim().toLowerCase()}`, String(f.market).toUpperCase())
+            if (!its || its.length < 1000) break
+          }
+        }
+        const data = await windsor('facebook', account, 'date,product_id,spend,impressions,clicks,actions_purchase,action_values_purchase', from, to)
+        let n = 0
+        for (const x of data) {
+          const raw = String(x.product_id ?? '')
+          const cut = raw.indexOf(', ')
+          if (cut < 0 || !x.date) continue
+          const item = raw.slice(0, cut).trim().toUpperCase()
+          const market = titles.get(`${item}|${raw.slice(cut + 2).trim().toLowerCase()}`)
+          if (!market || !markets.includes(market)) continue
+          const k = `meta|${x.date}|${market}|${item}|`
+          const r = rows.get(k) ?? blank('meta', String(x.date), market, item, '')
+          r.impressions += num(x.impressions); r.clicks += num(x.clicks); r.spend += num(x.spend)
+          r.conversions += num(x.actions_purchase); r.conversion_value += num(x.action_values_purchase)
+          rows.set(k, r); n++
+        }
+        out.meta = { rows: data.length, kept: n }
+        pulled.add('meta')
       } else {
         const data = await windsor('google_ads', account, 'date,campaign_type,product_country,product_item_id,impressions,clicks,spend,conversions,conversion_value', from, to)
         let n = 0
