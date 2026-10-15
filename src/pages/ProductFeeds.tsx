@@ -20,6 +20,13 @@ type Seg = {
   avg_discount_pct: number | null; avg_discount_start: number | null; max_discount_pct: number | null; new_items: number; removed_items: number; price_changes: number
   views: number; add_to_cart: number; purchases: number; revenue: number; clicks: number; spend: number; conversion_value: number; meta_spend: number; meta_value: number; start_day: string | null; end_day: string | null
 }
+type Alert = { id: number; created_at: string; severity: 'visoko' | 'srednje' | 'info' | 'ok'; kind: string; title: string; lines: string[]; seen_at: string | null }
+const ALERT_CLS: Record<Alert['severity'], string> = {
+  visoko: 'border-l-4 border-l-red-500', srednje: 'border-l-4 border-l-amber-400', info: 'border-l-4 border-l-[var(--color-line)]', ok: 'border-l-4 border-l-emerald-500',
+}
+const ALERT_ICON: Record<string, string> = {
+  feed_down: 'ne radi', feed_up: 'radi', feed_suspicious: 'sumnjivo', feed_stale: 'bez promena', segment_added: 'dodato', segment_removed: 'sklonjeno', feed_changes: 'promene',
+}
 type Sum = { day: string; value: string; kind: string; n: number; avg_pct: number | null; items: { item_id: string; title: string | null; old: string | null; new: string | null; pct: number | null }[] }
 // How each kind of change reads in the summary.
 const SUM_LABEL: Record<string, (n: number) => string> = {
@@ -63,7 +70,8 @@ export default function ProductFeeds() {
   const [kind, setKind] = useState('')
   const [q, setQ] = useState('')
   const [error, setError] = useState('')
-  const [tab, setTab] = useState<'segments' | 'perf' | 'changes'>('segments')
+  const [tab, setTab] = useState<'alerts' | 'segments' | 'perf' | 'changes'>('alerts')
+  const [alerts, setAlerts] = useState<Alert[]>([])
   const [dim, setDim] = useState('category')
   const [segs, setSegs] = useState<Seg[]>([])
   const [sums, setSums] = useState<Sum[]>([])
@@ -144,6 +152,20 @@ export default function ProductFeeds() {
       setSums((data ?? []) as Sum[])
     })
   }, [feedId, dim, days, tab])
+  async function loadAlerts() {
+    if (!feedId) return
+    const { data } = await supabase.from('feed_alerts').select('id, created_at, severity, kind, title, lines, seen_at').eq('feed_id', feedId).order('created_at', { ascending: false }).limit(100)
+    setAlerts((data ?? []) as Alert[])
+  }
+  useEffect(() => { loadAlerts() }, [feedId]) // eslint-disable-line react-hooks/exhaustive-deps
+  async function markSeen(ids: number[]) {
+    if (!ids.length) return
+    const { data: u } = await supabase.auth.getUser()
+    await supabase.from('feed_alerts').update({ seen_at: new Date().toISOString(), seen_by: u.user?.id ?? null }).in('id', ids)
+    loadAlerts()
+  }
+  const unseen = alerts.filter((a) => !a.seen_at)
+
   const sumDays = useMemo(() => {
     const m = new Map<string, Map<string, Sum[]>>()
     for (const x of sums) {
@@ -210,10 +232,33 @@ export default function ProductFeeds() {
 
 
           <div className="mb-4 flex overflow-hidden rounded border border-[var(--color-line)] text-sm" style={{ width: 'fit-content' }}>
-            {([['segments', 'Segmenti'], ['perf', 'Učinak po proizvodu'], ['changes', 'Promene u feedu']] as const).map(([k, l]) => (
+            {([['alerts', `Obaveštenja${unseen.length ? ` (${unseen.length})` : ''}`], ['segments', 'Segmenti'], ['perf', 'Učinak po proizvodu'], ['changes', 'Promene u feedu']] as const).map(([k, l]) => (
               <button key={k} onClick={() => setTab(k)} className={`px-4 py-1.5 ${tab === k ? 'bg-[var(--color-indigo)] text-white' : 'bg-white'}`}>{l}</button>
             ))}
           </div>
+
+          {tab === 'alerts' && (
+          <section className="mb-10">
+            <div className="mb-3 flex flex-wrap items-center gap-3">
+              <p className="text-sm text-[var(--color-ink-soft)]">Posle svake provere feeda: da li radi, da li se menja, šta je dodato ili sklonjeno (brend, kategorija, label) i šta se promenilo po kategoriji.</p>
+              {unseen.length > 0 && <button onClick={() => markSeen(unseen.map((a) => a.id))} className="ml-auto rounded border border-[var(--color-line)] bg-white px-3 py-1 text-xs">Označi sve kao viđeno</button>}
+            </div>
+            {!alerts.length && <p className="rounded border border-dashed border-[var(--color-line)] bg-white p-4 text-sm text-[var(--color-ink-soft)]">Još nema obaveštenja. Feed radi; obaveštenja nastaju kad se nešto promeni ili prestane da radi.</p>}
+            <ul className="space-y-2">
+              {alerts.map((a) => (
+                <li key={a.id} className={`rounded border border-[var(--color-line)] bg-white px-4 py-2 ${ALERT_CLS[a.severity]} ${a.seen_at ? 'opacity-60' : ''}`}>
+                  <div className="flex flex-wrap items-baseline gap-2">
+                    <span className="rounded bg-[var(--color-paper)] px-1.5 text-xs">{ALERT_ICON[a.kind] ?? a.kind}</span>
+                    <span className="text-sm font-medium">{a.title}</span>
+                    <span className="ml-auto text-xs text-[var(--color-ink-soft)]">{when(a.created_at)}</span>
+                    {!a.seen_at && <button onClick={() => markSeen([a.id])} className="text-xs text-[var(--color-ink-soft)] underline">viđeno</button>}
+                  </div>
+                  {a.lines?.length > 0 && <ul className="mt-1 list-disc pl-5 text-xs text-[var(--color-ink-soft)]">{a.lines.slice(0, 12).map((l, i) => <li key={i}>{l}</li>)}</ul>}
+                </li>
+              ))}
+            </ul>
+          </section>
+          )}
 
           {tab === 'segments' && (
           <section className="mb-10">

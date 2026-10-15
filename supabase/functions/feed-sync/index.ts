@@ -199,6 +199,9 @@ Deno.serve(async (req: Request) => {
       const { error: se } = await sb.rpc('feed_segment_snapshot', { p_feed_id: feed.id })
       if (se) console.error('feed_segment_snapshot', se.message)
     }
+    // Notices for the team: works / does not work, brand or category added or removed, what changed.
+    const { error: ae } = await sb.rpc('feed_generate_alerts', { p_feed_id: feed.id })
+    if (ae) console.error('feed_generate_alerts', ae.message)
     return json({ ok: res.status !== 'greska', ...res }, res.status === 'greska' ? 502 : 200)
   } catch (e) {
     return json({ error: (e as Error).message }, 500)
