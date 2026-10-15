@@ -571,9 +571,10 @@ async function teamRuleChanges(clientId: string, params: Record<string, unknown>
         agg.set(k, a)
       }
     }
-    const { data: existing } = await sb.from('ppc_changes').select('fingerprint, status, decided_at').eq('client_id', clientId).eq('kind', 'negative_keyword')
+    const { data: existing } = await sb.from('ppc_changes').select('id, fingerprint, status, decided_at, match_type').eq('client_id', clientId).eq('kind', 'negative_keyword')
+    const byFp = new Map((existing ?? []).map((e) => [e.fingerprint, e]))
     const blocked = new Set((existing ?? []).filter((e) => ACTIVE_CHANGE.includes(e.status) || (e.status === 'odbijeno' && Date.parse(e.decided_at ?? '') > Date.now() - 90 * 864e5)).map((e) => e.fingerprint))
-    const fresh = [...agg.values()].filter((a) => !blocked.has(`neg:${a.campaign}:${a.competitor}`)).map((a) => {
+    const proposals = [...agg.values()].map((a) => {
       const top = a.terms.sort((x, y) => y.spend - x.spend)
       return {
         client_id: clientId, task: 'search_terms', kind: 'negative_keyword', network: 'google', campaign: a.campaign,
@@ -583,11 +584,21 @@ async function teamRuleChanges(clientId: string, params: Record<string, unknown>
         fingerprint: `neg:${a.campaign}:${a.competitor}`,
       }
     })
+    // A search term equal to the competitor's name may already be proposed as an exact negative (same fingerprint):
+    // while it is only proposed, it becomes the phrase negative.
+    for (const r of proposals) {
+      const e = byFp.get(r.fingerprint)
+      if (e && e.status === 'predlog' && e.match_type !== 'Phrase') {
+        await sb.from('ppc_changes').update({ match_type: 'Phrase', reason: r.reason, details: r.details }).eq('id', e.id)
+        added++
+      }
+    }
+    const fresh = proposals.filter((r) => !blocked.has(r.fingerprint))
     for (let i = 0; i < fresh.length; i += 200) {
       const { error: insErr } = await sb.from('ppc_changes').insert(fresh.slice(i, i + 200))
       if (insErr) throw insErr
     }
-    added = fresh.length
+    added += fresh.length
   }
   // Clean up what is still only proposed.
   const { data: open } = await sb.from('ppc_changes').select('id, kind, campaign, network, target, status, details').eq('client_id', clientId).in('status', ACTIVE_CHANGE)
