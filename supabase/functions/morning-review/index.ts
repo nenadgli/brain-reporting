@@ -232,7 +232,9 @@ function buildPrompt(clientName: string, params: Record<string, unknown>, dataDa
     placements.length ? JSON.stringify(placements.map((p) => p.evidence)) : '[] (nema plasmana ove nedelje)',
     '',
     'ZADATAK 2, ostali nalazi. Naslov vec postoji (title); za svaki napisi detail i proposal i proceni severity.',
-    '- Pacing: poredi sa planom po flightovima (plan_to_date), ne linearno; linear_to_date pomeni samo ako pomaze. Predlog koristi daily_adjustment (iznos dnevno za always-on kampanje) i napomenu o predstojecim flightovima (upcoming_flights).',
+    '- Pacing: poredi sa planom po flightovima (plan_to_date), ne linearno; linear_to_date pomeni samo ako pomaze. Predlog koristi daily_adjustment (iznos dnevno za always-on kampanje) i napomenu o predstojecim flightovima (upcoming_flights). Kad je mode=projection: plan se ne trosi ravnomerno (akcije, nedeljni plan iz media plana); projected_month je procena do kraja meseca po proseku poslednjih 7 dana (last7_daily). Mesecni plan se ne sme preci bez zahteva klijenta; premala potrosnja izdvojenog budzeta za akciju takodje nije prihvatljiva.',
+    '- roas_low: ROAS kampanje za poslednjih days dana je ispod minimuma njene grupe (min_roas, cilj target_roas). Kad je roas_source=ga4, ROAS je iz GA4 prihoda (tako tim izvestava klijenta), a roas_platform je ROAS iz platforme; pomeni oba ako se mnogo razlikuju. Svrha grupe je u purpose. Tim menja tROAS za 10-20% i ceka nekoliko dana; PMax se ne dira dok uci (2 nedelje) osim ako su rezultati katastrofalni.',
+    '- Grupe kampanja: polje mode u dokazu. mode=upozorenja znaci da tim zeli samo upozorenje, bez predloga izmene budzeta ili podesavanja; tada je proposal provera, ne izmena.',
     '- spend_stopped: vise kampanja je palo na 0. Za svaku stavku pogledaj last_spend_date, days_without_spend, planned_flights_that_day i flights_ended_last_3_days: ako se flight upravo zavrsio, gasenje je verovatno planirano; ako planirani flight jos traje, a kampanja ne trosi vise od jednog dana, to je problem. Reci za koje kampanje je sta. keep=false samo ako su sve planirane.',
     '- spend_anomaly: kampanja je znacajno porasla ili pala; koristi planned_flights_that_day i flights_ended_last_3_days da objasnis.',
     '- Tracking i pad konverzija: proveri da li to moze biti kasnjenje podataka za poslednji dan; predlozi proveru u nalogu pre bilo kakve izmene.',
@@ -311,7 +313,10 @@ function titleFor(c: Candidate): string {
   const e = c.evidence as any
   switch (c.check_type) {
     case 'pacing':
+      if (e.mode === 'projection') return `${NET[e.network]}: procena do kraja meseca ${eur(e.projected_month)} od ${eur(e.plan_month)} plana (${Math.round(e.ratio * 100)}%)`
       return `${NET[e.network]}: potrošeno ${eur(e.spent_to_date)} od ${eur(e.plan_to_date)} planiranih do ${dm(e.data_date)} (${Math.round(e.ratio * 100)}% plana po flightovima)`
+    case 'roas_low':
+      return `${NET[e.network]} ${short(e.campaign)}: ROAS ${fmt1(e.roas)}${e.roas_source === 'ga4' ? ' (GA4)' : ''} za ${e.days} dana, minimum za ${e.group} je ${fmt1(e.min_roas)}`
     case 'spend_stopped':
       return `${e.items.length} ${kampanja(e.items.length)} bez troška ${dm(e.date)}: ${e.items.slice(0, 3).map((i: { network: string; campaign: string }) => `${NET[i.network]} ${short(i.campaign)}`).join(', ')}${e.items.length > 3 ? ' i druge' : ''}`
     case 'spend_anomaly':
@@ -392,7 +397,10 @@ function fallbackFor(c: Candidate): { detail: string; proposal: string } {
     case 'ga4_tracking':
       return { detail: 'Poređenje poslednjih 7 dana sa prethodne 4 nedelje.', proposal: 'Proveriti UTM parametre, auto-tagging (gclid) i consent podešavanja sa tracking timom.' }
     case 'pacing':
+      if (e.mode === 'projection') return { detail: `Potrošeno ${eur(e.spent_to_date)}, poslednjih 7 dana prosečno ${eur(e.last7_daily)} dnevno; ostalo je ${e.remaining_days} dana.`, proposal: `Proveriti sa nedeljnim planom iz media plana; ako odstupanje nije planirano, dnevni budžet pomeriti za ${eur(e.daily_adjustment)}.` }
       return { detail: `Plan za mesec je ${eur(e.plan_month)}; ostalo je ${e.remaining_days} dana.`, proposal: `Dnevni budžet always-on kampanja pomeriti za ${eur(e.daily_adjustment)}.` }
+    case 'roas_low':
+      return { detail: `Trošak ${eur(e.spend)}, prihod u GA4 ${eur(e.revenue_ga4)}, prihod na platformi ${eur(e.revenue_platform)} (ROAS ${fmt1(e.roas_platform)}).`, proposal: e.mode === 'upozorenja' ? 'Samo upozorenje: proveriti uzrok pre bilo kakve izmene.' : 'Proveriti ciljanje, kreative i landing stranu; ako nije akcija u toku, smanjiti budžet ili tROAS cilj u koracima od 10–20%.' }
     default:
       return { detail: '', proposal: 'Proveriti u nalogu pre bilo kakve izmene.' }
   }

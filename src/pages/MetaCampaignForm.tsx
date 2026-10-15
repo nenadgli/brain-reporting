@@ -38,6 +38,9 @@ export default function MetaCampaignForm({ client, market, brief, images, onSave
   const [objective, setObjective] = useState<Objective>('OUTCOME_AWARENESS')
   const [phase, setPhase] = useState('Tof')
   const [budgetLevel, setBudgetLevel] = useState<'campaign' | 'adset'>('adset')
+  // Actions usually get new ad sets in existing campaigns (ADV, remarketing, collection); a new campaign is the exception.
+  const [target, setTarget] = useState<'existing' | 'new'>('existing')
+  const [existingId, setExistingId] = useState('')
   const [budgetType, setBudgetType] = useState<'daily' | 'lifetime'>('lifetime')
   const [budget, setBudget] = useState('')
   const [start, setStart] = useState('')
@@ -82,7 +85,26 @@ export default function MetaCampaignForm({ client, market, brief, images, onSave
 
   const baseOf = (id: string) => profile?.adsets.find((a) => a.adset_id === id) ?? null
   const obj = OBJECTIVES.find((o) => o.key === objective)!
-  const campaignName = `LFT19_${theme || 'Akcija'} (Mkt:${market || 'XX'};Ct:${obj.ct};Ph:${phase})`
+  // The client's campaigns from Windsor (active first); CBO when the campaign itself has a budget.
+  const campaigns = useMemo(() => {
+    const m = new Map<string, { id: string; name: string; objective: string | null; status: string | null; cbo: boolean; spend: number }>()
+    for (const a of profile?.adsets ?? []) {
+      if (!a.campaign_id) continue
+      const prev = m.get(a.campaign_id)
+      const cbo = Number(a.campaign_daily_budget ?? 0) > 0 || Number(a.campaign_lifetime_budget ?? 0) > 0
+      m.set(a.campaign_id, { id: a.campaign_id, name: a.campaign, objective: a.objective, status: a.campaign_status, cbo, spend: (prev?.spend ?? 0) + Number(a.spend ?? 0) })
+    }
+    return [...m.values()].sort((x, y) => Number(y.status === 'ACTIVE') - Number(x.status === 'ACTIVE') || y.spend - x.spend)
+  }, [profile])
+  const existing = target === 'existing' ? campaigns.find((c) => c.id === existingId) ?? null : null
+  const campaignName = existing ? existing.name : `LFT19_${theme || 'Akcija'} (Mkt:${market || 'XX'};Ct:${obj.ct};Ph:${phase})`
+  function pickExisting(id: string) {
+    setExistingId(id)
+    const c = campaigns.find((x) => x.id === id)
+    if (!c) return
+    if (c.objective && OBJECTIVES.some((o) => o.key === c.objective)) setObjective(c.objective as Objective)
+    setBudgetLevel(c.cbo ? 'campaign' : 'adset')
+  }
 
   // Team convention for Meta ad sets: "Akcija_20%_na_FW26(Mkt:RS;Tg:Broad)"; Tg:LP_Visitors when it targets custom audiences (remarketing).
   function adsetNameOf(name: string, t: Targeting | null) {
@@ -125,8 +147,8 @@ export default function MetaCampaignForm({ client, market, brief, images, onSave
 
   function buildCampaign(): MetaCampaign {
     return {
-      name: campaignName, objective, budget_level: budgetLevel, budget_type: budgetType,
-      budget: budgetLevel === 'campaign' ? parseFloat(budget) : null, start: start || null, end: end || null,
+      name: campaignName, campaign_id: existing?.id ?? null, objective, budget_level: budgetLevel, budget_type: budgetType,
+      budget: budgetLevel === 'campaign' && !existing ? parseFloat(budget) : null, start: start || null, end: end || null,
       page_id: pageId.trim(), instagram_id: igId.trim(), pixel_id: pixelId.trim(), event: 'PURCHASE',
       brief_title: brief?.title ?? null, task_url: brief?.task_url ?? null,
       adsets: adsets.map((a) => {
@@ -152,7 +174,8 @@ export default function MetaCampaignForm({ client, market, brief, images, onSave
   if (!pageId.trim()) problems.push('Nedostaje Facebook Page ID.')
   if (!link.trim().startsWith('http')) problems.push('Link mora biti pun URL (https://…).')
   if (budgetType === 'lifetime' && !end) problems.push('Lifetime budžet traži datum kraja.')
-  if (budgetLevel === 'campaign' && !(parseFloat(budget) > 0)) problems.push('Upiši budžet kampanje.')
+  if (target === 'existing' && !existing) problems.push('Izaberi postojeću kampanju.')
+  if (!existing && budgetLevel === 'campaign' && !(parseFloat(budget) > 0)) problems.push('Upiši budžet kampanje.')
   adsets.forEach((a, i) => {
     const n = `Ad set ${i + 1}`
     if (!a.name.trim()) problems.push(`${n}: upiši ime.`)
@@ -196,33 +219,48 @@ export default function MetaCampaignForm({ client, market, brief, images, onSave
     <div className="space-y-6">
       <section className="card p-5">
         <p className="mb-1 text-sm font-semibold">1. Kampanja</p>
-        <p className="mb-4 text-xs text-[var(--color-ink-soft)]">Ime prati konvenciju naloga. Sve se izvozi kao Paused, a ti je uključuješ u Ads Manageru kad akcija počne.</p>
+        <p className="mb-3 text-xs text-[var(--color-ink-soft)]">Akcija obično dobija nove ad setove u postojećim kampanjama (ADV, remarketing, collection); postojeća kampanja se ne menja. Novi ad setovi i oglasi se izvoze kao Paused.</p>
+        <div className="mb-4 inline-flex rounded-lg border border-[var(--color-line)] p-0.5 text-sm">
+          {([['existing', 'Novi ad set u postojećoj kampanji'], ['new', 'Nova kampanja']] as const).map(([k, l]) => (
+            <button key={k} type="button" onClick={() => setTarget(k)} className={`rounded-md px-3 py-1.5 ${target === k ? 'bg-[var(--color-indigo)] text-white' : 'text-[var(--color-ink-soft)]'}`}>{l}</button>
+          ))}
+        </div>
+        {target === 'existing' && (
+          <label className="mb-4 block"><span className={label}>Postojeća kampanja (iz Windsora, aktivne prve)</span>
+            <select className="input w-full" value={existingId} onChange={(e) => pickExisting(e.target.value)}>
+              <option value="">{profileLoading ? 'Učitavam…' : '— izaberi —'}</option>
+              {campaigns.map((c) => <option key={c.id} value={c.id}>{`${c.name} · ${c.status === 'ACTIVE' ? 'aktivna' : 'pauzirana'} · ${c.cbo ? 'budžet na kampanji' : 'budžet po ad setu'}`}</option>)}
+            </select>
+          </label>
+        )}
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <label><span className={label}>Tema</span><input className="input w-full" value={theme} onChange={(e) => setTheme(clean(e.target.value))} placeholder="Privilege_Exclusive" /></label>
-          <label><span className={label}>Cilj</span>
+          <label><span className={label}>Tema (za imena ad setova i oglasa)</span><input className="input w-full" value={theme} onChange={(e) => setTheme(clean(e.target.value))} placeholder="Privilege_Exclusive" /></label>
+          {!existing && <><label><span className={label}>Cilj</span>
             <select className="input w-full" value={objective} onChange={(e) => setObjective(e.target.value as Objective)}>
               {OBJECTIVES.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
             </select>
           </label>
           <label><span className={label}>Faza</span>
             <select className="input w-full" value={phase} onChange={(e) => setPhase(e.target.value)}>{PHASES.map((p) => <option key={p}>{p}</option>)}</select>
-          </label>
+          </label></>}
           <label><span className={label}>Početak</span><input type="date" className="input w-full" value={start} onChange={(e) => setStart(e.target.value)} /></label>
           <label><span className={label}>Kraj</span><input type="date" className="input w-full" value={end} onChange={(e) => setEnd(e.target.value)} /></label>
           <label><span className={label}>Link oglasa</span><input className="input w-full" value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…" /></label>
-          <label><span className={label}>Budžet na nivou</span>
+          {!existing && <label><span className={label}>Budžet na nivou</span>
             <select className="input w-full" value={budgetLevel} onChange={(e) => setBudgetLevel(e.target.value as 'campaign' | 'adset')}>
               <option value="adset">ad seta (svaki svoj)</option><option value="campaign">kampanje (CBO)</option>
             </select>
-          </label>
-          <label><span className={label}>Vrsta budžeta</span>
+          </label>}
+          {!(existing && budgetLevel === 'campaign') && <label><span className={label}>Vrsta budžeta</span>
             <select className="input w-full" value={budgetType} onChange={(e) => setBudgetType(e.target.value as 'daily' | 'lifetime')}>
               <option value="lifetime">ukupan za period</option><option value="daily">dnevni</option>
             </select>
-          </label>
-          {budgetLevel === 'campaign' && <label><span className={label}>Budžet kampanje (valuta naloga)</span><input className="input w-full" inputMode="decimal" value={budget} onChange={(e) => setBudget(e.target.value)} /></label>}
+          </label>}
+          {!existing && budgetLevel === 'campaign' && <label><span className={label}>Budžet kampanje (valuta naloga)</span><input className="input w-full" inputMode="decimal" value={budget} onChange={(e) => setBudget(e.target.value)} /></label>}
         </div>
-        <p className="mt-3 text-xs text-[var(--color-ink-soft)]">Ime kampanje: <b className="text-[var(--color-ink)]">{campaignName}</b></p>
+        <p className="mt-3 text-xs text-[var(--color-ink-soft)]">
+          {existing ? <>Ad setovi idu u: <b className="text-[var(--color-ink)]">{campaignName}</b>{existing.cbo ? ' (budžet je na kampanji, ad set ga deli)' : ''}</> : <>Ime kampanje: <b className="text-[var(--color-ink)]">{campaignName}</b></>}
+        </p>
         <details className="mt-3 text-xs">
           <summary className="cursor-pointer text-[var(--color-ink-soft)]">Nalog: Page {pageId || '—'} · Instagram {igId || 'preko Page-a'} · Pixel {pixelId || '—'}</summary>
           <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-3">
@@ -255,7 +293,7 @@ export default function MetaCampaignForm({ client, market, brief, images, onSave
                   <label className="md:col-span-2"><span className={label}>Kopiraj ciljanje iz</span>
                     <select className="input w-full" value={a.base} onChange={(e) => pickBase(a.key, e.target.value)}>
                       <option value="">— samo država {market || ''}, bez ostalog ciljanja —</option>
-                      {(profile?.adsets ?? []).map((x) => (
+                      {[...(profile?.adsets ?? [])].sort((x, y) => Number(y.campaign_id === existingId) - Number(x.campaign_id === existingId)).map((x) => (
                         <option key={x.adset_id} value={x.adset_id}>{`${x.adset_name} · ${x.campaign}${x.spend ? ` · ${Math.round(x.spend)} potrošeno` : ''}`}</option>
                       ))}
                     </select>

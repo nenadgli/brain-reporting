@@ -12,7 +12,7 @@ type F = Finding & { run_date: string }
 type Area = { key: string; label: string; checks: string[] }
 const AREAS: Area[] = [
   { key: 'budget', label: 'Budžet', checks: ['pacing', 'campaign_budgets', 'meta_cap'] },
-  { key: 'perf', label: 'Trošak i rezultati', checks: ['spend_anomaly', 'spend_stopped', 'conv_drop', 'tracking', 'data'] },
+  { key: 'perf', label: 'Trošak i rezultati', checks: ['spend_anomaly', 'spend_stopped', 'roas_low', 'conv_drop', 'tracking', 'data'] },
   { key: 'terms', label: 'Search termini', checks: ['search_terms'] },
   { key: 'placements', label: 'Plasmani', checks: ['placements'] },
   { key: 'ads', label: 'Oglasi i preporuke', checks: ['ads_policy', 'recommendations'] },

@@ -44,6 +44,7 @@ export const CHECK_LABEL: Record<string, string> = {
   pacing: 'Trošenje prema planu',
   spend_anomaly: 'Odstupanje troška',
   spend_stopped: 'Kampanje bez troška',
+  roas_low: 'ROAS ispod minimuma',
   tracking: 'Tracking',
   conv_drop: 'Pad konverzija',
   search_terms: 'Search termini',

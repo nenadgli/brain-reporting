@@ -24,7 +24,8 @@ export type Targeting = Record<string, unknown> & {
 
 // A past ad set from Windsor, used as the base for a new one (its targeting, goal and Page).
 export type BaseAdSet = {
-  campaign: string; adset_name: string; adset_id: string; objective: string | null; targeting: Targeting | null
+  campaign: string; campaign_id: string | null; campaign_status: string | null; campaign_daily_budget: number | null; campaign_lifetime_budget: number | null
+  adset_name: string; adset_id: string; objective: string | null; targeting: Targeting | null
   promoted_object: Record<string, unknown> | null; optimization_goal: string | null; billing_event: string | null
   start_time: string | null; end_time: string | null; spend: number; reach: number; page_id: string | null; instagram_id: string | null; cta: string | null; link: string | null
 }
@@ -32,6 +33,8 @@ export type BaseAdSet = {
 export type MetaAd = { name: string; primary_texts: string[]; headlines: string[]; description: string; cta: string; link: string; image: ImageAsset | null }
 export type MetaAdSet = { name: string; base_adset_id: string | null; base_label: string | null; targeting: Targeting; optimization_goal: string; billing_event: string; budget: number | null; ads: MetaAd[] }
 export type MetaCampaign = {
+  // Set when the ad sets go into an existing campaign: the file then references it by ID and leaves it as it is.
+  campaign_id?: string | null
   name: string; objective: Objective; budget_level: 'campaign' | 'adset'; budget_type: 'daily' | 'lifetime'; budget: number | null
   start: string | null; end: string | null; page_id: string; instagram_id: string; pixel_id: string; event: string
   adsets: MetaAdSet[]; brief_title: string | null; task_url: string | null
@@ -82,7 +85,7 @@ const OBJECTIVE_COLUMN: Record<Objective, string> = {
 }
 const MAX_TEXTS = 5
 const HEADERS = [
-  'Campaign Name', 'Campaign Status', 'Campaign Objective', 'Buying Type', 'Campaign Daily Budget', 'Campaign Lifetime Budget',
+  'Campaign ID', 'Campaign Name', 'Campaign Status', 'Campaign Objective', 'Buying Type', 'Campaign Daily Budget', 'Campaign Lifetime Budget',
   'Ad Set Run Status', 'Ad Set Name', 'Ad Set Time Start', 'Ad Set Time Stop', 'Ad Set Daily Budget', 'Ad Set Lifetime Budget',
   'Link Object ID', 'Optimized Conversion Tracking Pixels', 'Optimized Event',
   'Countries', 'Regions', 'Cities', 'Addresses', 'Location Types', 'Gender', 'Age Min', 'Age Max',
@@ -123,10 +126,13 @@ export function bulkCsv(campaigns: MetaCampaign[]): string {
       for (const a of s.ads) {
         const texts = a.primary_texts.slice(0, MAX_TEXTS)
         const titles = a.headlines.slice(0, MAX_TEXTS)
+        const own = !c.campaign_id
         const r: Record<string, string> = {
-          'Campaign Name': c.name, 'Campaign Status': 'PAUSED', 'Campaign Objective': OBJECTIVE_COLUMN[c.objective], 'Buying Type': 'AUCTION',
-          'Campaign Daily Budget': cbo && c.budget_type === 'daily' ? money(c.budget) : '',
-          'Campaign Lifetime Budget': cbo && c.budget_type === 'lifetime' ? money(c.budget) : '',
+          'Campaign ID': c.campaign_id ?? '', 'Campaign Name': c.name,
+          // An existing campaign is only referenced: no status, objective or budget, so nothing about it changes.
+          'Campaign Status': own ? 'PAUSED' : '', 'Campaign Objective': own ? OBJECTIVE_COLUMN[c.objective] : '', 'Buying Type': own ? 'AUCTION' : '',
+          'Campaign Daily Budget': own && cbo && c.budget_type === 'daily' ? money(c.budget) : '',
+          'Campaign Lifetime Budget': own && cbo && c.budget_type === 'lifetime' ? money(c.budget) : '',
           'Ad Set Run Status': 'PAUSED', 'Ad Set Name': s.name, 'Ad Set Time Start': time(c.start), 'Ad Set Time Stop': time(c.end, true),
           'Ad Set Daily Budget': !cbo && c.budget_type === 'daily' ? money(s.budget) : '',
           'Ad Set Lifetime Budget': !cbo && c.budget_type === 'lifetime' ? money(s.budget) : '',
