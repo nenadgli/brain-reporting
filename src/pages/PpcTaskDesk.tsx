@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { TASKS, TASK_BY_KEY, logAction, type TaskKey, type View } from '../lib/ppcTasks'
 import { CHECK_LABEL, Evidence, SEVERITY, STATUS_LABEL, type Finding, type Status } from './MorningReview'
+import { downloadText } from '../lib/creatives'
 
 // "PPC taskovi": one place per client for every recurring Productive task. For each task: Brain's
 // analysis (findings of the checks behind it), a decision with a comment on every finding, and
@@ -11,6 +12,31 @@ import { CHECK_LABEL, Evidence, SEVERITY, STATUS_LABEL, type Finding, type Statu
 type Client = { client_id: string; clients: { name: string } | null; params: { currency?: string } }
 type Cell = { client_id: string; task: TaskKey; applies: boolean; last_done: string | null; open_items: number; status: 'u_roku' | 'kasni' | 'nikad' | 'ceka' | 'uskoro' }
 type Review = { id: string; task: string; created_at: string; user_email: string | null; n_findings: number; n_approved: number; n_rejected: number; n_postponed: number; n_open: number; comment: string; findings: { title: string; status: string; comment: string | null }[] }
+type Change = {
+  id: string; task: string; kind: 'negative_keyword' | 'placement_exclusion' | 'daily_budget'; network: 'google' | 'meta'
+  campaign: string | null; target: string | null; match_type: string | null; old_amount: number | null; new_amount: number | null
+  reason: string | null; details: Record<string, unknown>; status: 'predlog' | 'odobreno' | 'odbijeno' | 'izvezeno' | 'poslato' | 'greska' | 'isteklo'
+  comment: string | null; created_at: string; exported_at: string | null
+}
+const CHANGE_STATUS: Record<Change['status'], { label: string; cls: string }> = {
+  predlog: { label: 'predlog', cls: 'bg-amber-50 text-amber-800' },
+  odobreno: { label: 'odobreno · čeka izvoz', cls: 'bg-[var(--color-indigo-soft)] text-[var(--color-indigo-dark)]' },
+  odbijeno: { label: 'odbijeno', cls: 'bg-[var(--color-paper)] text-[var(--color-ink-soft)]' },
+  izvezeno: { label: 'izvezeno za Editor', cls: 'bg-[var(--color-paper)] text-[var(--color-ink-soft)]' },
+  poslato: { label: 'poslato u Google Ads', cls: 'bg-[var(--color-indigo-soft)] text-[var(--color-indigo-dark)]' },
+  greska: { label: 'greška', cls: 'bg-red-50 text-[var(--color-rust)]' },
+  isteklo: { label: 'isteklo', cls: 'bg-[var(--color-paper)] text-[var(--color-ink-soft)]' },
+}
+// One readable line per change.
+function describe(c: Change, cur: string) {
+  const amount = (n: number | null) => (n == null ? '—' : `${Number(n).toLocaleString('sr-RS', { maximumFractionDigits: 2 })} ${cur}`)
+  if (c.kind === 'negative_keyword') return <>Negativna reč <b>[{c.target}]</b> ({(c.match_type ?? 'Exact').toLowerCase()}) u kampanji {c.campaign}</>
+  if (c.kind === 'placement_exclusion') return <>Isključi plasman <b>{String(c.details.name ?? c.target)}</b> <span className="text-[var(--color-ink-soft)]">({c.target})</span> na nivou naloga</>
+  return <>{c.network === 'meta' ? 'Meta' : 'Google'} dnevni budžet <b>{c.campaign}</b>: {amount(c.old_amount)} → <b>{amount(c.new_amount)}</b></>
+}
+const esc = (v: unknown) => { const s = v == null ? '' : String(v); return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s }
+const slug = (s: string) => s.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+
 type WorkEntry = { at: string; task: string; action: string; detail: string | null; user_email: string | null }
 
 const CELL: Record<Cell['status'], { label: string; cls: string }> = {
@@ -61,6 +87,9 @@ export default function PpcTaskDesk({ onOpen }: { onOpen: (v: View) => void }) {
   const [closing, setClosing] = useState('')
   const [message, setMessage] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
+  const [changes, setChanges] = useState<Change[]>([])
+  const [picked, setPicked] = useState<string[]>([])
+  const [changeComment, setChangeComment] = useState('')
 
   useEffect(() => {
     supabase.from('review_settings').select('client_id, params, clients(name)').eq('enabled', true).then(({ data }) => {
@@ -76,6 +105,64 @@ export default function PpcTaskDesk({ onOpen }: { onOpen: (v: View) => void }) {
     setCells((data ?? []) as Cell[])
   }
   useEffect(() => { loadBoard() }, [])
+
+  async function loadChanges() {
+    if (!clientId) return
+    const { data } = await supabase.from('ppc_changes').select('*').eq('client_id', clientId)
+      .or(`status.in.(predlog,odobreno,greska),created_at.gte.${new Date(Date.now() - 14 * 864e5).toISOString()}`)
+      .order('created_at', { ascending: false }).limit(1000)
+    setChanges((data ?? []) as Change[])
+    setPicked([])
+  }
+  useEffect(() => { loadChanges() }, [clientId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function decideChanges(ids: string[], status: 'odobreno' | 'odbijeno' | 'predlog') {
+    if (!ids.length) return
+    if (status === 'odbijeno' && !changeComment.trim()) { setMessage({ kind: 'err', text: 'Za odbijanje napiši komentar (zašto); Brain ga pamti i ne predlaže istu izmenu 90 dana.' }); return }
+    const { data: u } = await supabase.auth.getUser()
+    const { error } = await supabase.from('ppc_changes').update({
+      status, comment: changeComment.trim() || null, decided_by: status === 'predlog' ? null : u.user?.id ?? null, decided_at: status === 'predlog' ? null : new Date().toISOString(),
+    }).in('id', ids)
+    if (error) { setMessage({ kind: 'err', text: error.message }); return }
+    logAction(clientId, task, status === 'odobreno' ? 'odobreno' : status === 'odbijeno' ? 'odbijeno' : 'vraceno', `${ids.length} izmena${changeComment.trim() ? `: ${changeComment.trim()}` : ''}`)
+    setChangeComment(''); setMessage(null)
+    loadChanges()
+  }
+
+  async function regenerate() {
+    setBusy(true)
+    const { data, error } = await supabase.rpc('ppc_generate_changes', { p_client_id: clientId })
+    setBusy(false)
+    if (error) { setMessage({ kind: 'err', text: error.message }); return }
+    setMessage({ kind: 'ok', text: `Novih predloga: ${data ?? 0}.` })
+    loadChanges()
+  }
+
+  // Everything approved for this client in one go: Editor CSV (negatives, Google daily budgets), the
+  // account placement exclusion list and Meta budgets. With the Google Ads API this becomes "Pošalji".
+  async function exportApproved() {
+    const list = changes.filter((c) => c.status === 'odobreno')
+    if (!list.length) return
+    const name = slug(client?.clients?.name ?? 'klijent')
+    const day = new Date().toISOString().slice(0, 10)
+    const editor = list.filter((c) => c.kind === 'negative_keyword' || (c.kind === 'daily_budget' && c.network === 'google'))
+    if (editor.length) {
+      const lines = ['Campaign,Budget,Keyword,Criterion Type,Status', ...editor.map((c) => c.kind === 'negative_keyword'
+        ? [esc(c.campaign), '', esc(c.target), `Campaign Negative ${c.match_type ?? 'Exact'}`, 'Enabled'].join(',')
+        : [esc(c.campaign), Number(c.new_amount).toFixed(2), '', '', ''].join(','))]
+      downloadText(`izmene_${name}_${day}_editor.csv`, lines.join('\r\n') + '\r\n')
+    }
+    const pl = list.filter((c) => c.kind === 'placement_exclusion')
+    if (pl.length) downloadText(`izmene_${name}_${day}_iskljuceni-plasmani.csv`, ['Placement,Name,Type', ...pl.map((c) => [esc(c.target), esc(c.details.name), esc(c.details.type)].join(','))].join('\r\n') + '\r\n')
+    const meta = list.filter((c) => c.kind === 'daily_budget' && c.network === 'meta')
+    if (meta.length) downloadText(`izmene_${name}_${day}_meta-budzeti.csv`, ['Campaign,Daily budget', ...meta.map((c) => [esc(c.campaign), Number(c.new_amount).toFixed(2)].join(','))].join('\r\n') + '\r\n')
+    const batch = crypto.randomUUID()
+    const { error } = await supabase.from('ppc_changes').update({ status: 'izvezeno', exported_at: new Date().toISOString(), export_batch: batch }).in('id', list.map((c) => c.id))
+    if (error) { setMessage({ kind: 'err', text: error.message }); return }
+    for (const t of [...new Set(list.map((c) => c.task))]) logAction(clientId, t as TaskKey, 'editor_csv', `${list.filter((c) => c.task === t).length} odobrenih izmena izvezeno`)
+    setMessage({ kind: 'ok', text: `Preuzeto ${list.length} izmena. Editor: Import → From file → proveri → Post. Plasmani: Google Ads → Alati → Liste isključenja. Meta budžeti se unose ručno.` })
+    loadChanges()
+  }
 
   async function loadTask() {
     if (!clientId) return
@@ -167,7 +254,10 @@ export default function PpcTaskDesk({ onOpen }: { onOpen: (v: View) => void }) {
                 className={`w-full rounded border px-3 py-2 text-left text-sm ${task === t.key ? 'border-[var(--color-indigo)] bg-white' : 'border-transparent hover:bg-white'}`}>
                 <span className="flex items-center justify-between gap-2">
                   <span className="font-medium">{t.label}</span>
-                  {c && c.open_items > 0 && <span className="rounded bg-amber-100 px-1.5 text-xs font-medium text-amber-900">{c.open_items}</span>}
+                  {(() => {
+                    const n = (c?.open_items ?? 0) + changes.filter((x) => x.task === t.key && x.status === 'predlog').length
+                    return n > 0 ? <span className="rounded bg-amber-100 px-1.5 text-xs font-medium text-amber-900" title="nalazi + predložene izmene koje čekaju odluku">{n}</span> : null
+                  })()}
                 </span>
                 <span className="mt-0.5 flex items-center gap-2 text-xs text-[var(--color-ink-soft)]">
                   {c && <span className={`rounded px-1.5 ${CELL[c.status].cls}`}>{CELL[c.status].label}</span>}
@@ -183,6 +273,13 @@ export default function PpcTaskDesk({ onOpen }: { onOpen: (v: View) => void }) {
             <h2 className="font-display text-2xl font-medium">{info.label}</h2>
             <span className="text-sm text-[var(--color-ink-soft)]">{info.cadence} · poslednji put završen: {ago(mine[task]?.last_done ?? null)}</span>
           </div>
+          {changes.some((c) => c.status === 'odobreno') && (
+            <div className="mb-4 flex flex-wrap items-center gap-3 rounded border border-[var(--color-indigo)] bg-[var(--color-indigo-soft)] px-4 py-2 text-sm">
+              <span><b>{changes.filter((c) => c.status === 'odobreno').length}</b> odobrenih izmena za {client?.clients?.name} čeka slanje u nalog</span>
+              <button onClick={exportApproved} className="ml-auto rounded bg-[var(--color-indigo)] px-3 py-1 text-xs font-medium text-white">Preuzmi za Google Ads Editor</button>
+              <span className="text-xs text-[var(--color-ink-soft)]">Google Ads API: uskoro direktno slanje</span>
+            </div>
+          )}
           {message && <p className={`mb-4 rounded px-4 py-2 text-sm ${message.kind === 'ok' ? 'bg-[var(--color-indigo-soft)] text-[var(--color-indigo-dark)]' : 'bg-red-50 text-[var(--color-rust)]'}`}>{message.text}</p>}
 
           <section className="mb-6 rounded border border-[var(--color-line)] bg-white p-4 text-sm">
@@ -234,8 +331,50 @@ export default function PpcTaskDesk({ onOpen }: { onOpen: (v: View) => void }) {
             </div>
           </section>
 
+          {(() => {
+            const mineCh = changes.filter((c) => c.task === task)
+            const open = mineCh.filter((c) => c.status === 'predlog')
+            const done = mineCh.filter((c) => c.status !== 'predlog')
+            const supported = ['search_terms', 'placements', 'optimizacija_budzeta'].includes(task)
+            if (!supported && !mineCh.length) return null
+            return (
+              <section className="mb-6">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <p className="text-xs font-medium uppercase tracking-wide text-[var(--color-ink-soft)]">3 · Gotove izmene za nalog ({open.length} predloga)</p>
+                  <button onClick={regenerate} disabled={busy} className="ml-auto rounded border border-[var(--color-line)] px-2 py-0.5 text-xs">Osveži predloge</button>
+                </div>
+                <p className="mb-2 text-xs text-[var(--color-ink-soft)]">Svaka izmena je spremna za nalog. Štikliraj šta prihvataš i odobri; odobrene izmene preuzimaš za Google Ads Editor (gore). Kad se poveže Google Ads API, odobrene izmene idu direktno na slanje.</p>
+                {!mineCh.length && <p className="rounded border border-dashed border-[var(--color-line)] bg-white p-4 text-sm text-[var(--color-ink-soft)]">Nema predloženih izmena za ovaj task.</p>}
+                {open.length > 0 && (
+                  <div className="mb-2 flex flex-wrap items-end gap-2">
+                    <label className="flex items-center gap-1 text-xs"><input type="checkbox" checked={open.every((c) => picked.includes(c.id))} onChange={(e) => setPicked(e.target.checked ? [...new Set([...picked, ...open.map((c) => c.id)])] : picked.filter((id) => !open.some((c) => c.id === id)))} /> sve</label>
+                    <input value={changeComment} onChange={(e) => setChangeComment(e.target.value)} placeholder="komentar (obavezan za odbijanje)" className="min-w-64 flex-1 rounded border border-[var(--color-line)] bg-white px-3 py-1 text-sm" />
+                    <button onClick={() => decideChanges(picked.filter((id) => open.some((c) => c.id === id)), 'odobreno')} disabled={!picked.length} className="rounded bg-[var(--color-indigo)] px-3 py-1 text-xs font-medium text-white disabled:opacity-40">Odobri izabrane</button>
+                    <button onClick={() => decideChanges(picked.filter((id) => open.some((c) => c.id === id)), 'odbijeno')} disabled={!picked.length} className="rounded border border-[var(--color-line)] px-3 py-1 text-xs text-[var(--color-rust)] disabled:opacity-40">Odbij izabrane</button>
+                  </div>
+                )}
+                <ul className="divide-y divide-[var(--color-line)] rounded border border-[var(--color-line)] bg-white text-sm">
+                  {[...open, ...done].map((c) => (
+                    <li key={c.id} className="flex items-start gap-2 px-3 py-2">
+                      {c.status === 'predlog'
+                        ? <input type="checkbox" className="mt-1" checked={picked.includes(c.id)} onChange={(e) => setPicked(e.target.checked ? [...picked, c.id] : picked.filter((x) => x !== c.id))} />
+                        : <span className="w-3.5" />}
+                      <div className="flex-1">
+                        <p>{describe(c, cur)}</p>
+                        {c.reason && <p className="text-xs text-[var(--color-ink-soft)]">{c.reason}</p>}
+                        {c.comment && <p className="text-xs">„{c.comment}“</p>}
+                      </div>
+                      <span className={`shrink-0 rounded px-1.5 text-xs ${CHANGE_STATUS[c.status].cls}`}>{CHANGE_STATUS[c.status].label}</span>
+                      {(c.status === 'odobreno' || c.status === 'odbijeno') && <button onClick={() => decideChanges([c.id], 'predlog')} className="shrink-0 text-xs text-[var(--color-ink-soft)] underline">vrati</button>}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )
+          })()}
+
           <section className="mb-8 rounded border border-[var(--color-indigo)] bg-white p-4">
-            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--color-ink-soft)]">3 · Završi task</p>
+            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--color-ink-soft)]">4 · Završi task</p>
             {open.length > 0 && <p className="mb-2 text-xs text-amber-800">Još {open.length} nalaza čeka odluku; ostaće otvoreni i vide se u zapisu.</p>}
             <textarea value={closing} onChange={(e) => setClosing(e.target.value)} rows={3} className={inputCls}
               placeholder="Šta je urađeno, šta je odlučeno i šta Brain treba da zna sledeći put (npr. „za ovog klijenta ne predlagati isključivanje brend termina“)." />

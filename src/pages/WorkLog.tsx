@@ -11,7 +11,7 @@ type Closed = { id: string; client_name: string; task: TaskKey; created_at: stri
 
 const ACTION_LABEL: Record<string, string> = {
   odobreno: 'odobreno', odbijeno: 'odbijeno', odlozeno: 'odloženo', izvrseno: 'urađeno',
-  budzet_unet: 'budžet unet', zavrseno: 'task završen', novo: 'čeka odluku', nacrt: 'nacrt', izvezeno: 'izvezeno', objavljeno: 'objavljeno',
+  budzet_unet: 'budžet unet', zavrseno: 'task završen', novo: 'čeka odluku', vraceno: 'vraćeno na odluku', nacrt: 'nacrt', izvezeno: 'izvezeno', objavljeno: 'objavljeno',
   editor_csv: 'Editor CSV', meta_csv: 'Meta CSV', izvestaj_csv: 'izveštaj preuzet', negativne_csv: 'negativne CSV', iskljucenja_csv: 'isključenja CSV',
 }
 
