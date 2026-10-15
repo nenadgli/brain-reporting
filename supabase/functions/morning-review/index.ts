@@ -242,6 +242,7 @@ function buildPrompt(clientName: string, params: Record<string, unknown>, dataDa
     '- recommendations: optimization score naloga i preporuke Google-a. Ne preporucuj slepo prihvatanje: preporuke za broad match i display expansion uglavnom odbaciti, budzetske razmotriti samo ako kampanja gubi prikazivanja zbog budzeta.',
     '- ga4_tracking: u GA4 je porastao udeo saobracaja bez izvora (direct/unassigned) ili je pao broj placenih sesija po kliku; verovatno UTM, gclid ili consent problem. Predlog: proveriti sa tracking timom.',
     '- Kalendar akcija: brief_prep = akcija pocinje uskoro, a u Brain-u nema nacrta; brief_ended = akcija je zavrsena, a asset grupa jos trosi.',
+    '- Proizvodi (product_*): brojevi su po proizvodu za trziste feeda (market). product_spend_no_sale = troseno u Google Ads bez kupovine u GA4; predlozi proveru cene, velicina i stranice i izdvajanje custom labelom. product_no_ads = prodaje se bez oglasa; predlozi izdvajanje (bestseller). product_gone_spending = nema na stanju, a oglasi trose; Merchant Center kasni. product_price_drop = posle poskupljenja ili kraja akcije pala prodaja (per_day_before, per_day_after). feed_wave = feed nije preuzet, izgleda pokvareno ili se mnogo promenio. Pomeni 2-3 najveca proizvoda po imenu.',
     '- keep=false samo kad je ocigledno da nalaz nije problem.',
     JSON.stringify(others.map((o) => ({ fingerprint: o.fingerprint, check_type: o.check_type, severity: o.severity, title: titleFor(o), evidence: o.evidence }))),
   ].join('\n')
@@ -296,6 +297,8 @@ const short = (c: unknown) => {
   return [base, mkt, ct].filter(Boolean).join(' ')
 }
 const NET: Record<string, string> = { google: 'Google', meta: 'Meta' }
+// 1 proizvod, 2-4 proizvoda, 5+ proizvoda (11-14 always proizvoda).
+const proizvod = (n: number) => (n % 10 === 1 && n % 100 !== 11 ? 'proizvod' : 'proizvoda')
 // Serbian count agreement: 1 kampanja, 2-4 kampanje, 5+ kampanja (11-14 always kampanja).
 // Accusative after "za": 1 kampanju, 2-4 kampanje, 5+ kampanja.
 const kampanjuAcc = (n: number) => (n % 10 === 1 && n % 100 !== 11 ? 'kampanju' : kampanja(n))
@@ -337,6 +340,17 @@ function titleFor(c: Candidate): string {
       return `Akcija „${e.action}“ počinje ${dm(e.start_date)}, a u Brain-u nema pripremljene asset grupe`
     case 'brief_ended':
       return `„${e.asset_group}“ troši i posle kraja akcije ${dm(e.end_date)}: ${eur(e.spend_after_end)}`
+    case 'product_spend_no_sale':
+      return `${e.market}: ${e.count} ${proizvod(e.count)} bez ijedne prodaje, a ${eur(e.total_spend)} troška u Google Ads-u za 14 dana`
+    case 'product_no_ads':
+      return `${e.market}: ${e.count} ${proizvod(e.count)} sa prodajom (${fmt(e.total_purchases)} kupovina, ${eur(e.total_revenue)}), a skoro bez oglasa`
+    case 'product_gone_spending':
+      return `${e.market}: ${e.count} ${proizvod(e.count)} van stanja, a oglasi su i dalje trošili (${eur(e.total_spend_after)})`
+    case 'product_price_drop':
+      return `${e.market}: pad prodaje posle poskupljenja ili kraja akcije (${e.count} ${proizvod(e.count)})`
+    case 'feed_wave':
+      return e.failed ? `${e.market}: feed nije mogao da se preuzme` : e.suspicious ? `${e.market}: feed izgleda pokvareno (naglo manje proizvoda)`
+        : `${e.market}: velika promena u feedu za 24 h (${fmt(e.price_changes)} promena cene, ${fmt(e.removed)} nestalo, ${fmt(e.added)} novih)`
     default:
       return c.check_type
   }
@@ -361,6 +375,16 @@ function fallbackFor(c: Candidate): { detail: string; proposal: string } {
       return { detail: 'Lista oglasa i razloga je ispod.', proposal: 'U aktivnim kampanjama ispraviti oglase i poslati na review; u starim kampanjama ukloniti odbijene oglase.' }
     case 'recommendations':
       return { detail: 'Preporuke po kampanjama su ispod.', proposal: 'Proći preporuke u Google Ads-u: prihvatiti korisne, odbaciti broad match i display expansion.' }
+    case 'product_spend_no_sale':
+      return { detail: 'Lista proizvoda sa troškom, klikovima i pregledima je ispod (GA4 kupovine i Google Ads konverzije su 0).', proposal: 'Proveriti cenu, veličine i stranicu proizvoda; proizvode bez šanse izdvojiti custom labelom i isključiti ili im smanjiti ciljani ROAS.' }
+    case 'product_no_ads':
+      return { detail: 'Lista proizvoda sa kupovinama i prihodom iz GA4 je ispod.', proposal: 'Izdvojiti ih custom labelom (npr. bestseller) u posebnu asset grupu ili Shopping grupu sa većim budžetom.' }
+    case 'product_gone_spending':
+      return { detail: 'Proizvodi su nestali iz feeda, a Google Ads je posle toga trošio na njih.', proposal: 'Proveriti Merchant Center (dostupnost se ažurira sa kašnjenjem) i da li je nestanak sa stanja privremen.' }
+    case 'product_price_drop':
+      return { detail: 'Prosečne dnevne kupovine pre i posle promene cene su ispod.', proposal: 'Proveriti sa klijentom da li je promena cene namerna; razmotriti vraćanje akcije ili manji budžet za te proizvode.' }
+    case 'feed_wave':
+      return { detail: e.error ? String(e.error) : 'Zbir promena iz provera feeda u poslednja 24 sata.', proposal: 'Proveriti feed i Merchant Center pre nego što promene stignu u kampanje.' }
     case 'ga4_tracking':
       return { detail: 'Poređenje poslednjih 7 dana sa prethodne 4 nedelje.', proposal: 'Proveriti UTM parametre, auto-tagging (gclid) i consent podešavanja sa tracking timom.' }
     case 'pacing':
@@ -491,6 +515,8 @@ function termFindings(terms: Candidate[], classes: { term: string; kind: string;
 
 // Checks that run once a week; their findings stay open all week.
 const WEEKLY_TYPES = ['ads_policy', 'recommendations', 'placements', 'ga4_tracking']
+// Product and feed findings (clients with a product feed) come on top of the daily cap.
+const PRODUCT_TYPES = ['product_spend_no_sale', 'product_no_ads', 'product_gone_spending', 'product_price_drop', 'feed_wave']
 
 async function reviewClient(clientId: string, clientName: string, params: Record<string, unknown>, forceWeekly = false) {
   const runDate = today()
@@ -547,6 +573,9 @@ async function reviewClient(clientId: string, clientName: string, params: Record
       return true
     })
     candidates.push(...await budgetCandidates(clientId))
+    const { data: pc, error: pe } = await sb.rpc('product_candidates', { p_client_id: clientId })
+    if (pe) throw pe
+    candidates.push(...((pc ?? []) as Candidate[]))
     if (weekly) {
       const { data: wc, error: we } = await sb.rpc('weekly_candidates', { p_client_id: clientId })
       if (we) throw we
@@ -619,8 +648,8 @@ async function reviewClient(clientId: string, clientName: string, params: Record
 
     findings.sort((a, b) => (SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]) || ((b.impact_eur ?? 0) - (a.impact_eur ?? 0)))
     // The daily cap keeps the morning list short; the weekly checks come on top, once a week.
-    const daily = findings.filter((f) => !WEEKLY_TYPES.includes(f.check_type)).slice(0, Number(params.max_findings ?? 7))
-    findings = [...daily, ...findings.filter((f) => WEEKLY_TYPES.includes(f.check_type))]
+    const daily = findings.filter((f) => !WEEKLY_TYPES.includes(f.check_type) && !PRODUCT_TYPES.includes(f.check_type)).slice(0, Number(params.max_findings ?? 7))
+    findings = [...daily, ...findings.filter((f) => PRODUCT_TYPES.includes(f.check_type)), ...findings.filter((f) => WEEKLY_TYPES.includes(f.check_type))]
 
     if (findings.length) {
       const { error: insErr } = await sb.from('review_findings').insert(findings.map((f, i) => ({

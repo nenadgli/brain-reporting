@@ -56,6 +56,11 @@ export const CHECK_LABEL: Record<string, string> = {
   placements: 'Nedeljno · plasmani',
   ga4_tracking: 'Nedeljno · GA4 izvori',
   campaign_budgets: 'Mesečni budžeti',
+  product_spend_no_sale: 'Proizvodi · troše bez prodaje',
+  product_no_ads: 'Proizvodi · prodaju se bez oglasa',
+  product_gone_spending: 'Proizvodi · van stanja, a troše',
+  product_price_drop: 'Proizvodi · pad prodaje posle promene cene',
+  feed_wave: 'Product feed',
 }
 export const STATUS_LABEL: Record<Status, string> = {
   novo: 'Čeka odluku', odobreno: 'Odobreno', odbijeno: 'Odbijeno', odlozeno: 'Odloženo', izvrseno: 'Urađeno', isteklo: 'Isteklo',
@@ -230,6 +235,30 @@ export function Evidence({ f, cur }: { f: Finding; cur: string }) {
           <div key={k}><dt className="inline text-[var(--color-ink-soft)]">{k}: </dt><dd className="inline font-medium">{typeof v === 'number' ? fmtInt(v) : String(v ?? '—')}</dd></div>
         ))}
       </dl>
+    )
+  }
+  if (f.check_type.startsWith('product_')) {
+    const items = (e.items as Record<string, unknown>[]) ?? []
+    const cols: [string, string][] = f.check_type === 'product_spend_no_sale' ? [['spend', `Trošak (${cur})`], ['clicks', 'Klikovi'], ['views', 'Pregledi']]
+      : f.check_type === 'product_no_ads' ? [['purchases', 'Kupovine'], ['revenue', `Prihod (${cur})`], ['spend', `Trošak (${cur})`]]
+      : f.check_type === 'product_gone_spending' ? [['removed', 'Nestao'], ['spend_after', `Trošak posle (${cur})`], ['clicks_after', 'Klikovi posle']]
+      : [['kind', 'Promena'], ['old_value', 'Bilo'], ['new_value', 'Sada'], ['per_day_before', 'Kupovina/dan pre'], ['per_day_after', 'Kupovina/dan posle']]
+    const show = (k: string, v: unknown) => k === 'kind' ? (v === 'price_up' ? 'poskupeo' : 'kraj akcije') : k === 'removed' ? shortDate(String(v)) : typeof v === 'number' ? fmtInt(v) : String(v ?? '—')
+    return (
+      <table className="mt-2 w-full text-xs">
+        <thead className="text-left text-[var(--color-ink-soft)]">
+          <tr><th className="py-1 pr-3">Proizvod</th><th className="pr-3 text-right">Cena</th>{cols.map(([, l]) => <th key={l} className="pr-3 text-right">{l}</th>)}</tr>
+        </thead>
+        <tbody>
+          {items.map((i) => (
+            <tr key={String(i.item_id)} className="border-t border-[var(--color-line)]">
+              <td className="py-1 pr-3">{String(i.title ?? i.item_id)} <span className="text-[var(--color-ink-soft)]">{String(i.item_id)}</span></td>
+              <td className="pr-3 text-right">{i.price != null ? (i.sale_price != null ? `${fmtInt(Number(i.sale_price))} (${fmtInt(Number(i.price))})` : fmtInt(Number(i.price))) : '—'}</td>
+              {cols.map(([k]) => <td key={k} className="pr-3 text-right">{show(k, i[k])}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     )
   }
   const flat = Object.entries(e).filter(([k, v]) => v !== null && typeof v !== 'object' && k !== 'text_checked')
