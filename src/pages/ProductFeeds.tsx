@@ -14,6 +14,16 @@ type Perf = {
   last_change_kind: string | null; last_change_at: string | null; last_change_old: string | null; last_change_new: string | null
 }
 // Signals worth a look; thresholds are deliberately simple and shown on screen.
+type Seg = {
+  value: string; items: number; items_start: number | null; on_sale: number; on_sale_start: number | null; avg_price: number | null; avg_effective_price: number | null
+  avg_discount_pct: number | null; avg_discount_start: number | null; max_discount_pct: number | null; new_items: number; removed_items: number; price_changes: number
+  views: number; add_to_cart: number; purchases: number; revenue: number; clicks: number; spend: number; conversion_value: number; start_day: string | null; end_day: string | null
+}
+const DIMS: [string, string][] = [
+  ['category', 'Kategorija'], ['price', 'Cenovni razred (cena koju kupac plaća)'], ['discount', 'Popust'], ['sale', 'Akcija / puna cena'],
+  ['brand', 'Brend'], ['gender', 'Pol'], ['color', 'Boja'], ['google_category', 'Google kategorija'],
+  ['label0', 'Custom label 0'], ['label1', 'Custom label 1'], ['label2', 'Custom label 2'], ['label3', 'Custom label 3'], ['label4', 'Custom label 4'],
+]
 const FLAGS: { key: string; label: string; test: (p: Perf) => boolean }[] = [
   { key: 'bez_prodaje', label: 'troši bez prodaje (≥ 30, 0 kupovina)', test: (p) => p.spend >= 30 && p.purchases === 0 },
   { key: 'bez_oglasa', label: 'prodaje se, a skoro bez oglasa (≥ 3 kupovine, < 5 troška)', test: (p) => p.purchases >= 3 && p.spend < 5 },
@@ -45,7 +55,9 @@ export default function ProductFeeds() {
   const [kind, setKind] = useState('')
   const [q, setQ] = useState('')
   const [error, setError] = useState('')
-  const [tab, setTab] = useState<'perf' | 'changes'>('perf')
+  const [tab, setTab] = useState<'segments' | 'perf' | 'changes'>('segments')
+  const [dim, setDim] = useState('category')
+  const [segs, setSegs] = useState<Seg[]>([])
   const [days, setDays] = useState(30)
   const [perf, setPerf] = useState<Perf[]>([])
   const [flag, setFlag] = useState('')
@@ -93,6 +105,17 @@ export default function ProductFeeds() {
       setPerf(((data ?? []) as Perf[]).map((p) => ({ ...p, views: +p.views, add_to_cart: +p.add_to_cart, purchases: +p.purchases, revenue: +p.revenue, impressions: +p.impressions, clicks: +p.clicks, spend: +p.spend, conversions: +p.conversions, conversion_value: +p.conversion_value })))
     })
   }, [feedId, days])
+
+  useEffect(() => {
+    if (!feedId) return
+    const to = new Date(Date.now() - 864e5).toISOString().slice(0, 10)
+    const from = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10)
+    supabase.rpc('feed_segments', { p_feed_id: feedId, p_dim: dim, p_from: from, p_to: to }).then(({ data, error: e }) => {
+      if (e) { setError(e.message); return }
+      setSegs(((data ?? []) as Seg[]).map((x) => ({ ...x, revenue: +x.revenue, spend: +x.spend, purchases: +x.purchases, conversion_value: +x.conversion_value, views: +x.views })))
+    })
+  }, [feedId, dim, days])
+  const segTotals = useMemo(() => segs.reduce((t, x) => ({ items: t.items + x.items, revenue: t.revenue + x.revenue, spend: t.spend + x.spend }), { items: 0, revenue: 0, spend: 0 }), [segs])
 
   const perfShown = useMemo(() => {
     const t = q.trim().toLowerCase()
@@ -149,10 +172,64 @@ export default function ProductFeeds() {
 
 
           <div className="mb-4 flex overflow-hidden rounded border border-[var(--color-line)] text-sm" style={{ width: 'fit-content' }}>
-            {([['perf', 'Učinak po proizvodu'], ['changes', 'Promene u feedu']] as const).map(([k, l]) => (
+            {([['segments', 'Segmenti'], ['perf', 'Učinak po proizvodu'], ['changes', 'Promene u feedu']] as const).map(([k, l]) => (
               <button key={k} onClick={() => setTab(k)} className={`px-4 py-1.5 ${tab === k ? 'bg-[var(--color-indigo)] text-white' : 'bg-white'}`}>{l}</button>
             ))}
           </div>
+
+          {tab === 'segments' && (
+          <section className="mb-10">
+            <div className="mb-3 flex flex-wrap items-center gap-3">
+              <select value={dim} onChange={(e) => setDim(e.target.value)} className={inputCls}>
+                {DIMS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+              </select>
+              <select value={days} onChange={(e) => setDays(Number(e.target.value))} className={inputCls}>
+                {[7, 14, 30].map((d) => <option key={d} value={d}>poslednjih {d} dana</option>)}
+              </select>
+              {segs[0]?.start_day && <span className="text-xs text-[var(--color-ink-soft)]">stanje feeda: {segs[0].end_day} naspram {segs[0].start_day}{segs[0].start_day === segs[0].end_day ? ' (istorija segmenata se puni od danas)' : ''}</span>}
+            </div>
+            <p className="mb-2 text-xs text-[var(--color-ink-soft)]">Feed: proizvodi, udeo na akciji, prosečna cena i popust danas i promena od početka perioda, novi, nestali i promene cene u periodu. Prodaja (GA4) i oglasi (Google Ads) su za isti period; udeo pokazuje da li segment dobija oglase srazmerno prodaji.</p>
+            <div className="overflow-x-auto rounded border border-[var(--color-line)] bg-white">
+              <table className="w-full text-xs">
+                <thead className="bg-[var(--color-paper)] text-left text-[var(--color-ink-soft)]">
+                  <tr>
+                    <th className="px-3 py-2">{DIMS.find(([k]) => k === dim)?.[1]}</th>
+                    <th className="px-2 text-right">Proizvoda</th><th className="px-2 text-right">Na akciji</th><th className="px-2 text-right">Prosečan popust</th>
+                    <th className="px-2 text-right">Prosečna cena</th><th className="px-2 text-right">Novi / nestali</th><th className="px-2 text-right">Promene cene</th>
+                    <th className="px-2 text-right">Kupovine</th><th className="px-2 text-right">Prihod GA4</th><th className="px-2 text-right">Udeo prihoda</th>
+                    <th className="px-2 text-right">Trošak Ads</th><th className="px-2 text-right">Udeo troška</th><th className="px-2 text-right">ROAS Ads</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {segs.map((x) => {
+                    const delta = (a: number | null, b: number | null, unit = '') => (a == null || b == null || a === b ? '' : ` (${a > b ? '+' : ''}${Math.round((a - b) * 10) / 10}${unit})`)
+                    const revShare = segTotals.revenue ? x.revenue / segTotals.revenue * 100 : 0
+                    const spendShare = segTotals.spend ? x.spend / segTotals.spend * 100 : 0
+                    return (
+                      <tr key={x.value} className="border-t border-[var(--color-line)]">
+                        <td className="px-3 py-1.5 font-medium">{x.value}</td>
+                        <td className="px-2 text-right">{n0(x.items)}<span className="text-[var(--color-ink-soft)]">{delta(x.items, x.items_start)}</span></td>
+                        <td className="px-2 text-right">{x.items ? `${Math.round(x.on_sale / x.items * 100)}%` : '—'}</td>
+                        <td className="px-2 text-right">{x.avg_discount_pct != null ? `${x.avg_discount_pct}%` : '—'}<span className="text-[var(--color-ink-soft)]">{delta(x.avg_discount_pct, x.avg_discount_start, ' pp')}</span>{x.max_discount_pct != null ? <span className="block text-[var(--color-ink-soft)]">do {x.max_discount_pct}%</span> : null}</td>
+                        <td className="px-2 text-right">{n0(x.avg_effective_price)}{x.avg_price != null && x.avg_effective_price != null && x.avg_price !== x.avg_effective_price ? <span className="block text-[var(--color-ink-soft)]">pre popusta {n0(x.avg_price)}</span> : null}</td>
+                        <td className="px-2 text-right">{x.new_items} / {x.removed_items}</td>
+                        <td className="px-2 text-right">{x.price_changes}</td>
+                        <td className="px-2 text-right">{n0(x.purchases)}</td>
+                        <td className="px-2 text-right">{n0(x.revenue)}</td>
+                        <td className="px-2 text-right">{revShare ? `${Math.round(revShare)}%` : '—'}</td>
+                        <td className="px-2 text-right">{n0(x.spend)}</td>
+                        <td className={`px-2 text-right ${spendShare > revShare * 1.5 && spendShare >= 5 ? 'text-[var(--color-rust)]' : revShare > spendShare * 1.5 && revShare >= 5 ? 'text-[var(--color-indigo-dark)]' : ''}`}>{spendShare ? `${Math.round(spendShare)}%` : '—'}</td>
+                        <td className="px-2 text-right">{x.spend > 0 ? (x.conversion_value / x.spend).toFixed(1) : '—'}</td>
+                      </tr>
+                    )
+                  })}
+                  {!segs.length && <tr><td colSpan={13} className="px-3 py-4 text-sm text-[var(--color-ink-soft)]">Nema podataka po segmentima (snimak segmenata se pravi posle prve sledeće provere feeda).</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            <p className="mt-2 text-xs text-[var(--color-ink-soft)]">Crven udeo troška: segment dobija znatno veći deo budžeta nego prihoda. Plav: prodaje se više nego što dobija oglase.</p>
+          </section>
+          )}
 
           {tab === 'perf' && (
           <section className="mb-10">

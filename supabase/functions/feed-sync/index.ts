@@ -12,7 +12,7 @@ const LABELS = ['custom_label_0', 'custom_label_1', 'custom_label_2', 'custom_la
 type Item = {
   item_id: string; group_id: string | null; title: string | null; brand: string | null; category: string | null
   price: number | null; sale_price: number | null; currency: string | null; availability: string | null
-  link: string | null; image: string | null; labels: Record<string, string>
+  link: string | null; image: string | null; labels: Record<string, string>; attrs: Record<string, string>
 }
 type Stored = Item & { removed_at: string | null }
 
@@ -48,7 +48,11 @@ function money(v: string | undefined): { n: number | null; cur: string | null } 
   return { n: Number.isFinite(num) ? num : null, cur }
 }
 
-function toItems(rows: string[][]): Item[] {
+// Attributes kept for segments (gender, color...); the category comes from settings.category_field
+// (e.g. custom_label_1), else product_type, else google_product_category.
+const ATTRS = ['gender', 'color', 'age_group', 'material', 'size', 'product_type', 'google_product_category']
+
+function toItems(rows: string[][], categoryField?: string): Item[] {
   const head = rows[0].map((h) => h.trim().toLowerCase().replace(/^g:/, ''))
   const col = (r: string[], name: string) => { const i = head.indexOf(name); return i < 0 ? '' : (r[i] ?? '').trim() }
   const out = new Map<string, Item>()
@@ -60,9 +64,10 @@ function toItems(rows: string[][]): Item[] {
     for (const l of LABELS) { const v = col(r, l); if (v) labels[l] = v }
     out.set(id, {
       item_id: id, group_id: col(r, 'item_group_id') || null, title: col(r, 'title') || null, brand: col(r, 'brand') || null,
-      category: col(r, 'product_type') || col(r, 'google_product_category') || null,
+      category: (categoryField ? col(r, categoryField.toLowerCase()) : '') || col(r, 'product_type') || col(r, 'google_product_category') || null,
       price: p.n, sale_price: s.n != null && p.n != null && s.n < p.n ? s.n : null, currency: p.cur ?? s.cur,
       availability: col(r, 'availability') || null, link: col(r, 'link') || null, image: col(r, 'image_link') || null, labels,
+      attrs: Object.fromEntries(ATTRS.map((a) => [a, col(r, a)]).filter(([, v]) => v)),
     })
   }
   return [...out.values()]
@@ -74,7 +79,7 @@ const fmt = (n: number | null) => (n == null ? '' : n.toFixed(2))
 async function storedItems(feedId: string): Promise<Map<string, Stored>> {
   const m = new Map<string, Stored>()
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await sb.from('feed_items').select('item_id, group_id, title, brand, category, price, sale_price, currency, availability, link, image, labels, removed_at')
+    const { data, error } = await sb.from('feed_items').select('item_id, group_id, title, brand, category, price, sale_price, currency, availability, link, image, labels, attrs, removed_at')
       .eq('feed_id', feedId).order('item_id').range(from, from + 999)
     if (error) throw error
     for (const r of data ?? []) m.set(r.item_id, { ...r, price: r.price == null ? null : Number(r.price), sale_price: r.sale_price == null ? null : Number(r.sale_price) } as Stored)
@@ -90,7 +95,7 @@ async function inBatches<T>(rows: T[], size: number, fn: (b: T[]) => Promise<{ e
   }
 }
 
-async function syncFeed(feed: { id: string; url: string; last_hash: string | null }) {
+async function syncFeed(feed: { id: string; url: string; last_hash: string | null; settings?: { category_field?: string } | null }) {
   const started = Date.now()
   const now = new Date().toISOString()
   const snap: Record<string, unknown> = { feed_id: feed.id, checked_at: now }
@@ -99,7 +104,7 @@ async function syncFeed(feed: { id: string; url: string; last_hash: string | nul
     if (!r.ok) throw new Error(`HTTP ${r.status}`)
     const text = await r.text()
     const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))).map((b) => b.toString(16).padStart(2, '0')).join('')
-    const items = toItems(parseDelimited(text.replace(/^\uFEFF/, '')))
+    const items = toItems(parseDelimited(text.replace(/^\uFEFF/, '')), feed.settings?.category_field)
     if (!items.length) throw new Error('Feed nema nijedan proizvod (ili nema kolonu id)')
     const onSale = items.filter((i) => i.sale_price != null)
     Object.assign(snap, {
@@ -149,7 +154,7 @@ async function syncFeed(feed: { id: string; url: string; last_hash: string | nul
         const a = old.labels?.[l] ?? '', b = it.labels[l] ?? ''
         if (a !== b) { add(it.item_id, 'label', `${l}: ${a}`, `${l}: ${b}`); changed = true }
       }
-      if (changed || old.link !== it.link || old.image !== it.image || old.group_id !== it.group_id || old.category !== it.category || old.brand !== it.brand) upserts.push(row)
+      if (changed || old.link !== it.link || old.image !== it.image || old.group_id !== it.group_id || old.category !== it.category || old.brand !== it.brand || JSON.stringify(old.attrs ?? {}) !== JSON.stringify(it.attrs)) upserts.push(row)
     }
 
     const gone = suspicious ? [] : active.filter((s) => !seen.has(s.item_id))
@@ -185,10 +190,15 @@ Deno.serve(async (req: Request) => {
   try {
     const { feed_id } = await req.json().catch(() => ({}))
     if (!feed_id) return json({ error: 'feed_id je obavezan' }, 400)
-    const { data: feed, error } = await sb.from('product_feeds').select('id, url, last_hash, enabled').eq('id', feed_id).maybeSingle()
+    const { data: feed, error } = await sb.from('product_feeds').select('id, url, last_hash, enabled, settings').eq('id', feed_id).maybeSingle()
     if (error) throw error
     if (!feed) return json({ error: 'Feed nije pronađen' }, 404)
     const res = await syncFeed(feed)
+    // Today's per-segment state (category, price band, discount...) for the trend view.
+    if (res.status !== 'greska') {
+      const { error: se } = await sb.rpc('feed_segment_snapshot', { p_feed_id: feed.id })
+      if (se) console.error('feed_segment_snapshot', se.message)
+    }
     return json({ ok: res.status !== 'greska', ...res }, res.status === 'greska' ? 502 : 200)
   } catch (e) {
     return json({ error: (e as Error).message }, 500)
