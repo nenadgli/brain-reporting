@@ -242,7 +242,7 @@ function buildPrompt(clientName: string, params: Record<string, unknown>, dataDa
     '- recommendations: optimization score naloga i preporuke Google-a. Ne preporucuj slepo prihvatanje: preporuke za broad match i display expansion uglavnom odbaciti, budzetske razmotriti samo ako kampanja gubi prikazivanja zbog budzeta.',
     '- ga4_tracking: u GA4 je porastao udeo saobracaja bez izvora (direct/unassigned) ili je pao broj placenih sesija po kliku; verovatno UTM, gclid ili consent problem. Predlog: proveriti sa tracking timom.',
     '- Kalendar akcija: brief_prep = akcija pocinje uskoro, a u Brain-u nema nacrta; brief_ended = akcija je zavrsena, a asset grupa jos trosi.',
-    '- Proizvodi (product_*): brojevi su po proizvodu za trziste feeda (market). product_spend_no_sale = troseno u Google Ads bez kupovine u GA4; predlozi proveru cene, velicina i stranice i izdvajanje custom labelom. product_no_ads = prodaje se bez oglasa; predlozi izdvajanje (bestseller). product_gone_spending = nema na stanju, a oglasi trose; Merchant Center kasni. product_price_drop = posle poskupljenja ili kraja akcije pala prodaja (per_day_before, per_day_after). feed_wave = feed nije preuzet, izgleda pokvareno ili se mnogo promenio. Pomeni 2-3 najveca proizvoda po imenu.',
+    '- Proizvodi (product_*): brojevi su po proizvodu za trziste feeda (market). product_spend_no_sale = troseno u Google Ads bez kupovine u GA4; product_meta_no_sale = isto za Metu (katalog), predlozi iskljucenje iz product seta; product_no_ads i product_gone_spending racunaju Google Ads i Metu zajedno (google_after, meta_after); predlozi proveru cene, velicina i stranice i izdvajanje custom labelom. product_no_ads = prodaje se bez oglasa; predlozi izdvajanje (bestseller). product_gone_spending = nema na stanju, a oglasi trose; Merchant Center kasni. product_price_drop = posle poskupljenja ili kraja akcije pala prodaja (per_day_before, per_day_after). feed_wave = feed nije preuzet, izgleda pokvareno ili se mnogo promenio. Pomeni 2-3 najveca proizvoda po imenu.',
     '- keep=false samo kad je ocigledno da nalaz nije problem.',
     JSON.stringify(others.map((o) => ({ fingerprint: o.fingerprint, check_type: o.check_type, severity: o.severity, title: titleFor(o), evidence: o.evidence }))),
   ].join('\n')
@@ -342,6 +342,8 @@ function titleFor(c: Candidate): string {
       return `„${e.asset_group}“ troši i posle kraja akcije ${dm(e.end_date)}: ${eur(e.spend_after_end)}`
     case 'product_spend_no_sale':
       return `${e.market}: ${e.count} ${proizvod(e.count)} bez ijedne prodaje, a ${eur(e.total_spend)} troška u Google Ads-u za 14 dana`
+    case 'product_meta_no_sale':
+      return `${e.market}: ${e.count} ${proizvod(e.count)} bez ijedne prodaje, a ${eur(e.total_spend)} troška na Meti za 14 dana`
     case 'product_no_ads':
       return `${e.market}: ${e.count} ${proizvod(e.count)} sa prodajom (${fmt(e.total_purchases)} kupovina, ${eur(e.total_revenue)}), a skoro bez oglasa`
     case 'product_gone_spending':
@@ -377,6 +379,8 @@ function fallbackFor(c: Candidate): { detail: string; proposal: string } {
       return { detail: 'Preporuke po kampanjama su ispod.', proposal: 'Proći preporuke u Google Ads-u: prihvatiti korisne, odbaciti broad match i display expansion.' }
     case 'product_spend_no_sale':
       return { detail: 'Lista proizvoda sa troškom, klikovima i pregledima je ispod (GA4 kupovine i Google Ads konverzije su 0).', proposal: 'Proveriti cenu, veličine i stranicu proizvoda; proizvode bez šanse izdvojiti custom labelom i isključiti ili im smanjiti ciljani ROAS.' }
+    case 'product_meta_no_sale':
+      return { detail: 'Lista proizvoda sa Meta troškom i klikovima je ispod (GA4 kupovine i Meta kupovine su 0).', proposal: 'Isključiti ih iz kataloških setova (product set) ili im smanjiti udeo; proveriti cenu, veličine i stranicu proizvoda.' }
     case 'product_no_ads':
       return { detail: 'Lista proizvoda sa kupovinama i prihodom iz GA4 je ispod.', proposal: 'Izdvojiti ih custom labelom (npr. bestseller) u posebnu asset grupu ili Shopping grupu sa većim budžetom.' }
     case 'product_gone_spending':
@@ -516,7 +520,7 @@ function termFindings(terms: Candidate[], classes: { term: string; kind: string;
 // Checks that run once a week; their findings stay open all week.
 const WEEKLY_TYPES = ['ads_policy', 'recommendations', 'placements', 'ga4_tracking']
 // Product and feed findings (clients with a product feed) come on top of the daily cap.
-const PRODUCT_TYPES = ['product_spend_no_sale', 'product_no_ads', 'product_gone_spending', 'product_price_drop', 'feed_wave']
+const PRODUCT_TYPES = ['product_spend_no_sale', 'product_meta_no_sale', 'product_no_ads', 'product_gone_spending', 'product_price_drop', 'feed_wave']
 
 async function reviewClient(clientId: string, clientName: string, params: Record<string, unknown>, forceWeekly = false) {
   const runDate = today()

@@ -33,7 +33,7 @@ const HOW: Record<TaskKey, { analysis: string; screen?: View; screenLabel?: stri
   mesecna_potrosnja: { analysis: 'Potrošnja svih klijenata po mrežama za mesec.', screen: 'budgets', screenLabel: 'Budžeti → Potrošnja svih klijenata' },
   kampanje: { analysis: 'Nacrti kampanja iz Productive briefova (Search, PMax, Demand Gen, Video, Display) i Editor fajlovi.', screen: 'campaigns', screenLabel: 'Nove kampanje' },
   alokacija_budzeta: { analysis: 'Predlog raspodele mesečnog budžeta po kampanjama iz potrošnje i ROAS-a.', screen: 'budgets', screenLabel: 'Budžeti → Alokacija za mesec' },
-  proizvodi: { analysis: 'Brain svako jutro ukršta product feed sa GA4 i Google Ads po proizvodu: troši bez prodaje, prodaje se bez oglasa, van stanja a troši, pad prodaje posle promene cene, velike promene u feedu.', screen: 'products', screenLabel: 'Proizvodi' },
+  proizvodi: { analysis: 'Brain svako jutro ukršta product feed sa GA4, Google Ads i Metom po proizvodu: Google ili Meta troši bez prodaje, prodaje se bez oglasa, van stanja a troši, pad prodaje posle promene cene, velike promene u feedu.', screen: 'products', screenLabel: 'Proizvodi' },
   osvezavanje_oglasa: { analysis: 'Search oglasi sa slabim Ad Strength-om, LOW assetima ili malo asseta, sa novim tekstovima.', screen: 'campaigns', screenLabel: 'Nove kampanje → Osvežavanje Search oglasa' },
 }
 const ACTION: Record<string, string> = {
