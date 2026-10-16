@@ -4,7 +4,8 @@ import { createClient } from 'jsr:@supabase/supabase-js@2'
 // (Beograd); svaki alarm ide najviše jednom dnevno (tabela urgent_alerts). Samo klijenti sa params.alerts.
 // - no_conversions: trošak danas, a 0 kupovina, u 12h i 16h; samo nalozi koji inače imaju bar min_baseline kupovina dnevno.
 // - overspend: Google kampanja je danas potrošila bar overspend_ratio × dnevni budžet.
-// - landing_down: landing strana aktivnog oglasa vraća grešku (4xx/5xx ili ne odgovara).
+// - landing_down: landing strana aktivnog oglasa ne postoji (404/410), server greška (5xx) ili ne odgovara; jedna poruka
+//   za sve takve strane. 401/403/429 znači da sajt blokira proveru (zaštita od botova), a ne da strana ne radi.
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -90,7 +91,7 @@ async function checkClient(clientId: string, name: string, cfg: Record<string, u
     for (const r of gRows) spendBy.set(r.campaign, (spendBy.get(r.campaign) ?? 0) + (Number(r.spend) || 0))
     for (const [campaign, spend] of spendBy) {
       const b = budget.get(campaign)
-      if (b && spend >= b * ratio) alerts.push({ kind: 'overspend', key: `google:${campaign}`, payload: { campaign, spend, daily_budget: b },
+      if (b && spend >= b * ratio && spend - b >= Number(cfg.overspend_min_eur ?? 10)) alerts.push({ kind: 'overspend', key: `google:${campaign}`, payload: { campaign, spend, daily_budget: b },
         text: `*${name} · Google ${campaign}:* danas ${eur(spend)}, a dnevni budžet je ${eur(b)} (${Math.round((spend / b) * 100)}%).` })
     }
   }
@@ -100,6 +101,7 @@ async function checkClient(clientId: string, name: string, cfg: Record<string, u
     const { data: snap } = await sb.from('google_search_ads').select('snapshot_date').eq('client_id', clientId).order('snapshot_date', { ascending: false }).limit(1)
     const { data: ads } = snap?.length ? await sb.from('google_search_ads').select('final_url, campaign, impressions').eq('client_id', clientId).eq('snapshot_date', snap[0].snapshot_date).eq('ad_status', 'ENABLED') : { data: [] }
     const urls = [...new Map((ads ?? []).filter((a) => /^https?:\/\//.test(String(a.final_url ?? ''))).map((a) => [String(a.final_url), a.campaign])).entries()].slice(0, 60)
+    const down: { url: string; campaign: string; status: number }[] = []
     for (const [url, campaign] of urls) {
       let status = 0
       try {
@@ -107,9 +109,10 @@ async function checkClient(clientId: string, name: string, cfg: Record<string, u
         status = r.status
         await r.body?.cancel()
       } catch { status = 0 }
-      if (status === 0 || status >= 400) alerts.push({ kind: 'landing_down', key: url, payload: { url, campaign, status },
-        text: `*${name} · landing strana ne radi* (${status || 'ne odgovara'}): ${url} — kampanja ${campaign}.` })
+      if (status === 0 || status === 404 || status === 410 || status >= 500) down.push({ url, campaign, status })
     }
+    if (down.length) alerts.push({ kind: 'landing_down', key: down.map((d) => d.url).sort().join('|').slice(0, 500), payload: { down },
+      text: `*${name} · landing strane ne rade* (${down.length}):\n${down.slice(0, 10).map((d) => `• ${d.url} (${d.status || 'ne odgovara'}) — ${d.campaign}`).join('\n')}${down.length > 10 ? `\n… i još ${down.length - 10}` : ''}` })
   }
   return alerts
 }
