@@ -690,9 +690,12 @@ async function reviewClient(clientId: string, clientName: string, params: Record
     }
 
     // Skip what the team already decided within the cooldown.
+    // "Kasnije" (odlozeno) comes back after postpone_days (3 by default), the other decisions after cooldown_days.
     const since = new Date(Date.now() - Number(params.cooldown_days ?? 14) * 864e5).toISOString()
-    const { data: decided } = await sb.from('review_findings').select('fingerprint, check_type, evidence, status')
+    const postponedSince = Date.now() - Number(params.postpone_days ?? 3) * 864e5
+    const { data: decidedAll } = await sb.from('review_findings').select('fingerprint, check_type, evidence, status, decided_at')
       .eq('client_id', clientId).in('status', ['odobreno', 'odbijeno', 'odlozeno', 'izvrseno']).gte('decided_at', since)
+    const decided = (decidedAll ?? []).filter((d) => d.status !== 'odlozeno' || Date.parse(d.decided_at ?? '') > postponedSince)
     const decidedFp = new Set((decided ?? []).map((d) => d.fingerprint))
     const decidedTerms = new Set((decided ?? []).filter((d) => d.check_type === 'search_terms')
       .flatMap((d) => ((d.evidence as { terms?: { term: string }[] }).terms ?? []).map((t) => t.term)))

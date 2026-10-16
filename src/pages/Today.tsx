@@ -246,7 +246,7 @@ export default function Today() {
                             placeholder="Komentar (obavezan ako odbijaš)" className="input min-w-56 flex-1" />
                           <button onClick={() => decide(f, 'odobreno')} disabled={busy === f.id} className="btn-primary">Odobri{mine.length ? ` (${mine.filter((c) => !unchecked[c.id]).length})` : ''}</button>
                           <button onClick={() => decide(f, 'odbijeno')} disabled={busy === f.id} className="btn-secondary text-red-600">Odbij</button>
-                          <button onClick={() => decide(f, 'odlozeno')} disabled={busy === f.id} className="btn-ghost">Kasnije</button>
+                          <button onClick={() => decide(f, 'odlozeno')} disabled={busy === f.id} className="btn-ghost" title="Nalaz se vraća za 3 dana ako problem i dalje postoji">Kasnije (3 dana)</button>
                         </div>
                       </div>
                     </div>
