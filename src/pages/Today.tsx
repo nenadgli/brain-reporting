@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { logAction, type TaskKey } from '../lib/ppcTasks'
-import { type Change, describeChange, exportApproved, setChangeStatus } from '../lib/changes'
+import { type Change, exportApproved, setChangeStatus } from '../lib/changes'
 import { Evidence, SettingsPanel, type ClientOpt, type Finding, type Params } from './MorningReview'
 import WeekPlan from './WeekPlan'
+import ChangeBundles, { bundleChanges, visibleIds } from './ChangeBundles'
 
 // "Danas": everything Brain checked for a client this morning (and the weekly checks), grouped by area.
 // Each finding shows the ready account changes under it; the team approves, rejects (with a reason) or
@@ -43,6 +44,7 @@ export default function Today() {
   const [changes, setChanges] = useState<Change[]>([])
   const [comments, setComments] = useState<Record<string, string>>({})
   const [unchecked, setUnchecked] = useState<Record<string, boolean>>({})
+  const [showAll, setShowAll] = useState<Record<string, boolean>>({})
   const [lastRun, setLastRun] = useState<{ run_date: string; data_date: string | null; status: string; finished_at: string | null } | null>(null)
   const [showDone, setShowDone] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
@@ -111,11 +113,16 @@ export default function Today() {
     const { data: u } = await supabase.auth.getUser()
     const { error } = await supabase.from('review_findings').update({ status, decision_reason: comment || null, decided_by: u.user?.id ?? null, decided_at: new Date().toISOString() }).eq('id', f.id)
     const mine = changes.filter((c) => c.finding_id === f.id && c.status === 'predlog')
+    // Only the lines on screen are decided; the ones still hidden behind "show more" expire and may come back later.
+    const onScreen = new Set(visibleIds(mine, {}, !!showAll[f.id]))
+    const ticked = new Set(visibleIds(mine, unchecked, !!showAll[f.id]))
     if (!error && status === 'odobreno') {
-      await setChangeStatus(mine.filter((c) => !unchecked[c.id]).map((c) => c.id), 'odobreno', comment || null)
-      await setChangeStatus(mine.filter((c) => unchecked[c.id]).map((c) => c.id), 'odbijeno', comment || 'nije štiklirano pri odobravanju')
+      await setChangeStatus([...ticked], 'odobreno', comment || null)
+      await setChangeStatus(mine.filter((c) => onScreen.has(c.id) && !ticked.has(c.id)).map((c) => c.id), 'odbijeno', comment || 'nije štiklirano pri odobravanju')
     }
-    if (!error && status === 'odbijeno') await setChangeStatus(mine.map((c) => c.id), 'odbijeno', comment)
+    if (!error && status === 'odbijeno') await setChangeStatus([...onScreen], 'odbijeno', comment)
+    const hidden = mine.filter((c) => !onScreen.has(c.id)).map((c) => c.id)
+    if (!error && hidden.length) await supabase.from('ppc_changes').update({ status: 'isteklo' }).in('id', hidden)
     setBusy('')
     if (error) { setMessage({ kind: 'err', text: error.message }); return }
     logAction(clientId, taskOf(f.check_type), status, f.title + (comment ? ` — ${comment}` : ''))
@@ -125,10 +132,10 @@ export default function Today() {
   async function decideLoose(status: 'odobreno' | 'odbijeno') {
     const comment = (comments.loose ?? '').trim()
     if (status === 'odbijeno' && !comment) { setMessage({ kind: 'err', text: 'Za odbijanje napiši kratak razlog.' }); return }
-    const ids = loose.filter((c) => !unchecked[c.id]).map((c) => c.id)
+    const ids = visibleIds(loose, unchecked, !!showAll.loose)
     const err = await setChangeStatus(ids, status, comment || null)
     if (err) { setMessage({ kind: 'err', text: err.message }); return }
-    logAction(clientId, 'optimizacija_budzeta', status, `${ids.length} predloga dnevnih budžeta`)
+    logAction(clientId, loose.every((c) => c.kind === 'daily_budget') ? 'optimizacija_budzeta' : 'search_terms', status, `${ids.length} predloženih izmena`)
     await loadClient(); loadOverview()
   }
 
@@ -227,15 +234,8 @@ export default function Today() {
 
                         {mine.length > 0 && (
                           <div className="mt-3 rounded-lg bg-[var(--color-paper)] p-3">
-                            <p className="mb-2 text-xs font-medium text-[var(--color-ink-soft)]">Izmene za nalog ({mine.filter((c) => !unchecked[c.id]).length} od {mine.length}) · štiklirane se odobravaju</p>
-                            <ul className="max-h-64 space-y-1 overflow-y-auto">
-                              {mine.map((c) => (
-                                <li key={c.id} className="flex items-start gap-2 text-sm">
-                                  <input type="checkbox" className="mt-1" checked={!unchecked[c.id]} onChange={(e) => setUnchecked({ ...unchecked, [c.id]: !e.target.checked })} />
-                                  <span>{describeChange(c, cur)}{c.reason ? <span className="block text-xs text-[var(--color-ink-soft)]">{c.reason}</span> : null}</span>
-                                </li>
-                              ))}
-                            </ul>
+                            <p className="mb-2 text-xs font-medium text-[var(--color-ink-soft)]">Izmene za nalog · štiklirane se odobravaju</p>
+                            <ChangeBundles list={mine} unchecked={unchecked} setUnchecked={setUnchecked} showAll={!!showAll[f.id]} setShowAll={(v) => setShowAll({ ...showAll, [f.id]: v })} cur={cur} />
                           </div>
                         )}
 
@@ -247,7 +247,7 @@ export default function Today() {
                         <div className="mt-4 flex flex-wrap items-center gap-2">
                           <input value={comments[f.id] ?? ''} onChange={(e) => setComments({ ...comments, [f.id]: e.target.value })}
                             placeholder="Komentar (obavezan ako odbijaš)" className="input min-w-56 flex-1" />
-                          <button onClick={() => decide(f, 'odobreno')} disabled={busy === f.id} className="btn-primary">Odobri{mine.length ? ` (${mine.filter((c) => !unchecked[c.id]).length})` : ''}</button>
+                          <button onClick={() => decide(f, 'odobreno')} disabled={busy === f.id} className="btn-primary">Odobri{mine.length ? ` (${visibleIds(mine, unchecked, !!showAll[f.id]).length})` : ''}</button>
                           <button onClick={() => decide(f, 'odbijeno')} disabled={busy === f.id} className="btn-secondary text-red-600">Odbij</button>
                           <button onClick={() => decide(f, 'odlozeno')} disabled={busy === f.id} className="btn-ghost" title="Nalaz se vraća za 3 dana ako problem i dalje postoji">Kasnije (3 dana)</button>
                         </div>
@@ -262,16 +262,9 @@ export default function Today() {
 
         {loose.length > 0 && (
           <section className="mb-8">
-            <h2 className="mb-3 text-sm font-semibold text-[var(--color-ink-soft)]">{loose.every((c) => c.kind === 'daily_budget') ? 'Dnevni budžeti' : 'Ostale predložene izmene'} · {loose.length}</h2>
+            <h2 className="mb-3 text-sm font-semibold text-[var(--color-ink-soft)]">{loose.every((c) => c.kind === 'daily_budget') ? 'Dnevni budžeti' : 'Ostale predložene izmene'} · {bundleChanges(loose).length}</h2>
             <article className="card p-5">
-              <ul className="space-y-1">
-                {loose.map((c) => (
-                  <li key={c.id} className="flex items-start gap-2 text-sm">
-                    <input type="checkbox" className="mt-1" checked={!unchecked[c.id]} onChange={(e) => setUnchecked({ ...unchecked, [c.id]: !e.target.checked })} />
-                    <span>{describeChange(c, cur)}{c.reason ? <span className="block text-xs text-[var(--color-ink-soft)]">{c.reason}</span> : null}</span>
-                  </li>
-                ))}
-              </ul>
+              <ChangeBundles list={loose} unchecked={unchecked} setUnchecked={setUnchecked} showAll={!!showAll.loose} setShowAll={(v) => setShowAll({ ...showAll, loose: v })} cur={cur} />
               <div className="mt-4 flex flex-wrap items-center gap-2">
                 <input value={comments.loose ?? ''} onChange={(e) => setComments({ ...comments, loose: e.target.value })} placeholder="Komentar (obavezan ako odbijaš)" className="input min-w-56 flex-1" />
                 <button onClick={() => decideLoose('odobreno')} className="btn-primary">Odobri štiklirane</button>
