@@ -87,7 +87,7 @@ export default function WorkLog() {
         <div>
           <h1 className="font-display text-4xl font-medium">Istorija</h1>
           <p className="mt-2 max-w-xl text-sm text-[var(--color-ink-soft)]">
-            Šta je tim odlučio i uradio u Brain-u: odobrene i odbijene provere, izmene preuzete za Editor, budžeti i nacrti kampanja. Procena ušteđenog vremena računa jednu oblast po klijentu po danu.
+            Ko je šta uradio u Brain-u, po danima: odluke u Danas (odobreno, odbijeno, kasnije), izmene preuzete za Editor, uneti budžeti i nacrti kampanja.
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-3 text-sm">
@@ -110,8 +110,8 @@ export default function WorkLog() {
         {[
           ['Period', `${range.from.slice(8, 10)}.${range.from.slice(5, 7)}. – ${range.to.slice(8, 10)}.${range.to.slice(5, 7)}.`],
           ['Akcija u Brain-u', String(entries.length)],
-          ['Procena ušteđenog vremena', `${Math.floor(summary.minutes / 60)} h ${summary.minutes % 60} min`],
           ['Ljudi', String(summary.people)],
+          ['Klijenti', String(new Set(entries.map((e) => e.client_name).filter(Boolean)).size)],
         ].map(([k, v]) => (
           <div key={k} className="rounded border border-[var(--color-line)] bg-white p-4">
             <p className="text-xs text-[var(--color-ink-soft)]">{k}</p>
@@ -120,7 +120,31 @@ export default function WorkLog() {
         ))}
       </section>
 
-      <section className="mb-10 overflow-x-auto rounded border border-[var(--color-line)] bg-white">
+
+      <section className="space-y-6">
+        {!days.length && !loading && <p className="rounded border border-[var(--color-line)] bg-white px-4 py-6 text-sm text-[var(--color-ink-soft)]">U ovom periodu niko nije ništa uradio u Brain-u.</p>}
+        {days.map(([day, list]) => (
+          <div key={day}>
+            <h2 className="mb-2 text-sm font-medium">{fmtDay(day)} · {list.length}</h2>
+            <ul className="divide-y divide-[var(--color-line)] rounded border border-[var(--color-line)] bg-white text-sm">
+              {list.map((e, i) => (
+                <li key={i} className="flex flex-wrap items-baseline gap-x-3 px-3 py-1.5">
+                  <span className="w-12 text-xs text-[var(--color-ink-soft)]">{fmtTime(e.at)}</span>
+                  <span className="w-28 text-xs font-medium">{e.user_email ? who(e.user_email) : 'Brain'}</span>
+                  <span className="rounded bg-[var(--color-indigo-soft)] px-2 text-xs text-[var(--color-indigo-dark)]">{ACTION_LABEL[e.action] ?? e.action}</span>
+                  <span className="w-40 text-xs">{e.client_name ?? 'svi klijenti'}</span>
+                  <span className="flex-1 truncate">{e.detail}</span>
+                  <span className="text-xs text-[var(--color-ink-soft)]">{TASK_BY_KEY[e.task]?.label ?? e.task}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </section>
+      <details className="mt-10">
+        <summary className="cursor-pointer text-sm text-[var(--color-ink-soft)]">Po oblastima i procena ušteđenog vremena ({Math.floor(summary.minutes / 60)} h {summary.minutes % 60} min)</summary>
+        <p className="mt-2 text-xs text-[var(--color-ink-soft)]">Procena: za svaku oblast rada i svakog klijenta jednom dnevno se računa koliko bi taj posao trajao ručno, bez obzira na broj klikova.</p>
+      <div className="mt-3 overflow-x-auto rounded border border-[var(--color-line)] bg-white">
         <table className="w-full text-sm">
           <thead className="bg-[var(--color-paper)] text-left text-xs text-[var(--color-ink-soft)]">
             <tr><th className="px-3 py-2">Oblast</th><th className="px-2 text-right">Akcija</th><th className="px-2 text-right">Klijent × dan</th><th className="px-2 text-right">Procena</th><th className="px-2">Klijenti</th><th className="px-2">Ko</th></tr>
@@ -136,30 +160,10 @@ export default function WorkLog() {
                 <td className="px-2 text-xs text-[var(--color-ink-soft)]">{[...s.people].join(', ') || '—'}</td>
               </tr>
             ))}
-            {!summary.rows.length && !loading && <tr><td colSpan={6} className="px-3 py-4 text-sm text-[var(--color-ink-soft)]">U ovom periodu nema zabeleženog rada u Brain-u.</td></tr>}
           </tbody>
         </table>
-      </section>
-
-      <section className="space-y-6">
-        {days.map(([day, list]) => (
-          <div key={day}>
-            <h2 className="mb-2 text-sm font-medium">{fmtDay(day)} · {list.length}</h2>
-            <ul className="divide-y divide-[var(--color-line)] rounded border border-[var(--color-line)] bg-white text-sm">
-              {list.map((e, i) => (
-                <li key={i} className="flex flex-wrap items-baseline gap-x-3 px-3 py-1.5">
-                  <span className="w-12 text-xs text-[var(--color-ink-soft)]">{fmtTime(e.at)}</span>
-                  <span className="w-40 text-xs">{e.client_name ?? 'svi klijenti'}</span>
-                  <span className="w-56 text-xs text-[var(--color-ink-soft)]">{TASK_BY_KEY[e.task]?.label ?? e.task}</span>
-                  <span className="rounded bg-[var(--color-indigo-soft)] px-2 text-xs text-[var(--color-indigo-dark)]">{ACTION_LABEL[e.action] ?? e.action}</span>
-                  <span className="flex-1 truncate">{e.detail}</span>
-                  <span className="text-xs text-[var(--color-ink-soft)]">{who(e.user_email)}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
-      </section>
+      </div>
+      </details>
     </div>
   )
 }
