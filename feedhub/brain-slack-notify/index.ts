@@ -2,7 +2,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2.56.0'
 
 // PPC alarms from Brain to Slack, through Feed Hub's Slack bot (the bot token stays here).
 // Auth: x-api-key checked against external_api_keys (scope slack:notify). Only the channels in ALLOWED.
-// Actions: ensure_channel { name } | post { channel, text, mention_channel? }
+// Actions: whoami | ensure_channel { name } | post { channel, text, mention_channel? }
 
 const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
 const TOKEN = Deno.env.get('SLACK_BOT_TOKEN') ?? ''
@@ -25,9 +25,24 @@ async function slack(method: string, body: Record<string, unknown>): Promise<any
   return r.json()
 }
 
-// The channel's id: found among the workspace's public channels, created if missing, and joined by the bot.
+// The channel's id: first among the channels the bot is a member of (public or private, it was invited), then among
+// the workspace's public channels (joined if needed), and created as a public channel only if it does not exist.
 async function ensureChannel(name: string) {
   let cursor = ''
+  const memberOf: string[] = []
+  let memberError = ''
+  for (let i = 0; i < 20; i++) {
+    const r = await slack('users.conversations', { types: 'public_channel,private_channel', exclude_archived: true, limit: 1000, ...(cursor ? { cursor } : {}) })
+    if (!r.ok) { memberError = `users.conversations: ${r.error}${r.needed ? ` (treba ${r.needed})` : ''}`; break }
+    // deno-lint-ignore no-explicit-any
+    memberOf.push(...(r.channels ?? []).map((c: any) => c.name))
+    // deno-lint-ignore no-explicit-any
+    const ch = (r.channels ?? []).find((c: any) => c.name === name)
+    if (ch) return { id: ch.id, created: false }
+    cursor = r.response_metadata?.next_cursor ?? ''
+    if (!cursor) break
+  }
+  cursor = ''
   for (let i = 0; i < 20; i++) {
     const r = await slack('conversations.list', { types: 'public_channel', exclude_archived: true, limit: 1000, ...(cursor ? { cursor } : {}) })
     if (!r.ok) return { error: `conversations.list: ${r.error}${r.needed ? ` (treba ${r.needed})` : ''}` }
@@ -44,7 +59,7 @@ async function ensureChannel(name: string) {
     if (!cursor) break
   }
   const c = await slack('conversations.create', { name, is_private: false })
-  if (!c.ok) return { error: `conversations.create: ${c.error}${c.needed ? ` (treba ${c.needed})` : ''}` }
+  if (!c.ok) return { error: `kanal #${name} nije pronađen; bot je član: ${memberOf.join(', ') || '(nijednog)'}${memberError ? `; ${memberError}` : ''}; conversations.create: ${c.error}` }
   return { id: c.channel.id, created: true }
 }
 
@@ -57,6 +72,12 @@ Deno.serve(async (req) => {
     if (!TOKEN) return json({ error: 'SLACK_BOT_TOKEN missing' }, 500)
 
     const body = await req.json().catch(() => ({}))
+    // Which bot this token belongs to (the one to invite to the channel).
+    if (body.action === 'whoami') {
+      const a = await slack('auth.test', {})
+      const u = a.ok && a.user_id ? await slack('users.info', { user: a.user_id }) : null
+      return json({ ok: a.ok, error: a.error, team: a.team, bot_user: a.user, user_id: a.user_id, display_name: u?.user?.profile?.display_name || u?.user?.real_name || null })
+    }
     const name = String(body.channel ?? body.name ?? '').replace(/^#/, '')
     if (!ALLOWED.has(name)) return json({ error: `kanal ${name} nije dozvoljen` }, 400)
     const ch = await ensureChannel(name)
