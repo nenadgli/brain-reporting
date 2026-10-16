@@ -98,6 +98,7 @@ async function checkClient(clientId: string, name: string, cfg: Record<string, u
   }
 
   // 2b. Meta: a campaign with its own daily budget (CBO), or an ad set with one, past meta_overspend_ratio × that budget.
+  //     Windsor passes Meta budgets as the API gives them, in cents (15937 = 159,37 €).
   //     Meta may spend up to 75% over a daily budget on one day and evens it out over the week, so 150% is rare but legitimate.
   if (mAcc) {
     const ratio = Number(cfg.meta_overspend_ratio ?? 1.5)
@@ -108,12 +109,12 @@ async function checkClient(clientId: string, name: string, cfg: Record<string, u
       const sp = Number(r.spend) || 0
       const c = camp.get(r.campaign) ?? { spend: 0, budget: 0 }
       c.spend += sp
-      c.budget = Math.max(c.budget, Number(r.campaign_daily_budget) || 0)
+      c.budget = Math.max(c.budget, (Number(r.campaign_daily_budget) || 0) / 100)
       camp.set(r.campaign, c)
       const k = `${r.campaign}|${r.adset_name}`
       const a = adset.get(k) ?? { campaign: r.campaign, spend: 0, budget: 0 }
       a.spend += sp
-      a.budget = Math.max(a.budget, Number(r.adset_daily_budget) || 0)
+      a.budget = Math.max(a.budget, (Number(r.adset_daily_budget) || 0) / 100)
       adset.set(k, a)
     }
     const over = (spend: number, b: number) => b > 0 && spend >= b * ratio && spend - b >= Number(cfg.overspend_min_eur ?? 10)
