@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { type Change, describeChange } from '../lib/changes'
+import { type Change, COMPETITOR_LIST, describeChange, isCompetitorNegative } from '../lib/changes'
 
 // Proposed account changes grouped by what the team actually decides: one negative word (or one placement) in all its
 // campaigns is one line, not one checkbox per campaign. Lines are sorted by the money behind them; only the first
@@ -44,6 +44,7 @@ const eur = (n: number) => `${n.toLocaleString('sr-RS', { maximumFractionDigits:
 
 function label(b: Bundle, cur: string) {
   const c = b.rows[0]
+  if (isCompetitorNegative(c)) return `„${c.target}“ (${(c.match_type ?? 'Exact').toLowerCase()}) u listu ${COMPETITOR_LIST}, povezanu sa ${b.campaigns.length} ${b.campaigns.length === 1 ? 'kampanjom' : 'kampanja'}`
   if (c.kind === 'negative_keyword') {
     const n = b.campaigns.length
     return n > 1 ? `Negativna reč „${c.target}“ (${(c.match_type ?? 'Exact').toLowerCase()}) u ${n} kampanja` : describeChange(c, cur)
