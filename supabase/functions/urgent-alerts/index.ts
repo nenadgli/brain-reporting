@@ -1,6 +1,6 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
 
-// Hitni PPC alarmi tokom dana, na Slack (#ppc-alarmi) preko Feed Hub bota. Pokreće ga cron svakog sata 8–22h
+// Hitni PPC alarmi tokom dana, na Slack (#ppc-alarm) preko Feed Hub bota. Pokreće ga cron svakog sata 8–22h
 // (Beograd); svaki alarm ide najviše jednom dnevno (tabela urgent_alerts). Samo klijenti sa params.alerts.
 // - no_conversions: trošak danas, a 0 kupovina, u 12h i 16h; samo nalozi koji inače imaju bar min_baseline kupovina dnevno.
 // - overspend: Google kampanja je danas potrošila bar overspend_ratio × dnevni budžet.
