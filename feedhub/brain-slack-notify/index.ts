@@ -7,7 +7,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2.56.0'
 const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
 const TOKEN = Deno.env.get('SLACK_BOT_TOKEN') ?? ''
 const SCOPE = 'slack:notify'
-const ALLOWED = new Set(['ppc-alarmi'])
+const ALLOWED = new Set(['ppc-alarm'])
 const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { 'Content-Type': 'application/json' } })
 
 async function sha256(s: string) {
