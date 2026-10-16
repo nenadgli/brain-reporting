@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { logAction, type TaskKey } from '../lib/ppcTasks'
 import { type Change, describeChange, exportApproved, setChangeStatus } from '../lib/changes'
 import { Evidence, SettingsPanel, type ClientOpt, type Finding, type Params } from './MorningReview'
+import WeekPlan from './WeekPlan'
 
 // "Danas": everything Brain checked for a client this morning (and the weekly checks), grouped by area.
 // Each finding shows the ready account changes under it; the team approves, rejects (with a reason) or
@@ -18,7 +19,7 @@ const AREAS: Area[] = [
   { key: 'ads', label: 'Oglasi i preporuke', checks: ['ads_policy', 'recommendations'] },
   { key: 'products', label: 'Proizvodi i feed', checks: ['product_spend_no_sale', 'product_meta_no_sale', 'product_no_ads', 'product_gone_spending', 'product_price_drop', 'feed_wave'] },
   { key: 'actions', label: 'Akcije iz Productive-a', checks: ['brief_prep', 'brief_ended'] },
-  { key: 'ga4', label: 'GA4 i tracking', checks: ['ga4_tracking'] },
+  { key: 'ga4', label: 'GA4 i tracking', checks: ['ga4_gap', 'ga4_tracking'] },
 ]
 const areaOf = (check: string) => AREAS.find((a) => a.checks.includes(check)) ?? { key: 'other', label: 'Ostalo', checks: [] }
 // History keeps the old task keys so the work log stays comparable.
@@ -199,6 +200,8 @@ export default function Today() {
           </div>
         )}
         {message && <p className={`mb-6 rounded-lg px-4 py-2 text-sm ${message.kind === 'ok' ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-700'}`}>{message.text}</p>}
+
+        {clientId && <WeekPlan clientId={clientId} />}
 
         {!open.length && !loose.length && (
           <div className="card p-10 text-center">

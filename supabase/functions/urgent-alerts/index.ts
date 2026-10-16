@@ -3,7 +3,8 @@ import { createClient } from 'jsr:@supabase/supabase-js@2'
 // Hitni PPC alarmi tokom dana, na Slack (#ppc-alarm) preko Feed Hub bota. Pokreće ga cron svakog sata 8–22h
 // (Beograd); svaki alarm ide najviše jednom dnevno (tabela urgent_alerts). Samo klijenti sa params.alerts.
 // - no_conversions: trošak danas, a 0 kupovina, u 12h i 16h; samo nalozi koji inače imaju bar min_baseline kupovina dnevno.
-// - overspend: Google kampanja je danas potrošila bar overspend_ratio × dnevni budžet.
+// - overspend: Google kampanja je danas potrošila bar overspend_ratio × dnevni budžet; na Meti kampanja (CBO) ili ad set
+//   bar meta_overspend_ratio × svoj dnevni budžet.
 // - landing_down: landing strana aktivnog oglasa ne postoji (404/410), server greška (5xx) ili ne odgovara; jedna poruka
 //   za sve takve strane. 401/403/429 znači da sajt blokira proveru (zaštita od botova), a ne da strana ne radi.
 
@@ -96,6 +97,38 @@ async function checkClient(clientId: string, name: string, cfg: Record<string, u
     }
   }
 
+  // 2b. Meta: a campaign with its own daily budget (CBO), or an ad set with one, past meta_overspend_ratio × that budget.
+  //     Meta may spend up to 75% over a daily budget on one day and evens it out over the week, so 150% is rare but legitimate.
+  if (mAcc) {
+    const ratio = Number(cfg.meta_overspend_ratio ?? 1.5)
+    const rows = await windsor('facebook', mAcc, 'date,campaign,adset_name,spend,campaign_daily_budget,adset_daily_budget', day)
+    const camp = new Map<string, { spend: number; budget: number }>()
+    const adset = new Map<string, { campaign: string; spend: number; budget: number }>()
+    for (const r of rows) {
+      const sp = Number(r.spend) || 0
+      const c = camp.get(r.campaign) ?? { spend: 0, budget: 0 }
+      c.spend += sp
+      c.budget = Math.max(c.budget, Number(r.campaign_daily_budget) || 0)
+      camp.set(r.campaign, c)
+      const k = `${r.campaign}|${r.adset_name}`
+      const a = adset.get(k) ?? { campaign: r.campaign, spend: 0, budget: 0 }
+      a.spend += sp
+      a.budget = Math.max(a.budget, Number(r.adset_daily_budget) || 0)
+      adset.set(k, a)
+    }
+    const over = (spend: number, b: number) => b > 0 && spend >= b * ratio && spend - b >= Number(cfg.overspend_min_eur ?? 10)
+    for (const [campaign, c] of camp) {
+      if (over(c.spend, c.budget)) alerts.push({ kind: 'overspend', key: `meta:${campaign}`, payload: { network: 'meta', campaign, spend: c.spend, daily_budget: c.budget },
+        text: `*${name} · Meta ${campaign}:* danas ${eur(c.spend)}, a dnevni budžet kampanje je ${eur(c.budget)} (${Math.round((c.spend / c.budget) * 100)}%).` })
+    }
+    for (const [k, a] of adset) {
+      if ((camp.get(a.campaign)?.budget ?? 0) > 0) continue
+      const set = k.slice(a.campaign.length + 1)
+      if (over(a.spend, a.budget)) alerts.push({ kind: 'overspend', key: `meta:${k}`, payload: { network: 'meta', campaign: a.campaign, adset: set, spend: a.spend, daily_budget: a.budget },
+        text: `*${name} · Meta ${a.campaign} › ${set}:* danas ${eur(a.spend)}, a dnevni budžet ad seta je ${eur(a.budget)} (${Math.round((a.spend / a.budget) * 100)}%).` })
+    }
+  }
+
   // 3. Landing pages of active ads (Google RSA final URLs from the latest snapshot), checked every 2 hours.
   if (hour % 2 === 0) {
     const { data: snap } = await sb.from('google_search_ads').select('snapshot_date').eq('client_id', clientId).order('snapshot_date', { ascending: false }).limit(1)
@@ -123,6 +156,12 @@ Deno.serve(async (req) => {
     if (!internal || internal !== await secret('review_cron_key')) return json({ error: 'Pogrešan interni ključ' }, 403)
     const body = await req.json().catch(() => ({}))
     const now = local()
+    // Test: the raw Meta rows Windsor returns for one client (fields given), nothing stored or sent.
+    if (body.probe_meta && body.client_id) {
+      const acc = await account(body.client_id, 'facebook')
+      const rows = acc ? await windsor('facebook', acc, String(body.probe_meta), now.date) : []
+      return json({ account: acc, rows: rows.slice(0, 15) })
+    }
     const hour = body.hour != null ? Number(body.hour) : now.hour
     const slackKey = await secret('feedhub_slack_key')
     const { data: settings } = await sb.from('review_settings').select('client_id, params, clients(name)').eq('enabled', true)

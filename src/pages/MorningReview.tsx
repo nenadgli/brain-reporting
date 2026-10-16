@@ -45,6 +45,7 @@ export const CHECK_LABEL: Record<string, string> = {
   spend_anomaly: 'Odstupanje troška',
   spend_stopped: 'Kampanje bez troška',
   roas_low: 'ROAS ispod minimuma',
+  ga4_gap: 'Google i GA4 se razilaze',
   tracking: 'Tracking',
   conv_drop: 'Pad konverzija',
   search_terms: 'Search termini',

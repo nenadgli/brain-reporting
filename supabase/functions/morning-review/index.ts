@@ -242,6 +242,7 @@ function buildPrompt(clientName: string, params: Record<string, unknown>, dataDa
     '- campaign_budgets: kampanje odstupaju od mesečnog budžeta koji je tim uneo; predlog koristi recommended_daily (dnevni budžet da se ostatak potroši ravnomerno).',
     '- ads_policy: oglasi sa statusom DISAPPROVED ili APPROVED_LIMITED (topics je razlog). Predlog: u aktivnoj kampanji ispraviti oglas i poslati na review, u staroj kampanji ukloniti oglas; redovno da se izbegne suspenzija naloga.',
     '- recommendations: optimization score naloga i preporuke Google-a. Ne preporucuj slepo prihvatanje: preporuke za broad match i display expansion uglavnom odbaciti, budzetske razmotriti samo ako kampanja gubi prikazivanja zbog budzeta.',
+    '- ga4_gap: vrednost konverzija u Google Ads i GA4 prihod iz google / cpc se za poslednja 3 dana razlikuju vise od threshold_pct, a u 4 nedelje pre toga razlika je bila usual_gap_pct. Strana koja je niza je u lower. To je skoro uvek tracking: konverziona akcija, tag, consent ili gclid. Ne predlagati izmene budzeta ni bidova dok se tracking ne proveri, jer Smart Bidding uci na pogresnim konverzijama.',
     '- ga4_tracking: u GA4 je porastao udeo saobracaja bez izvora (direct/unassigned) ili je pao broj placenih sesija po kliku; verovatno UTM, gclid ili consent problem. Predlog: proveriti sa tracking timom.',
     '- Kalendar akcija: brief_prep = akcija pocinje uskoro, a u Brain-u nema nacrta; brief_ended = akcija je zavrsena, a asset grupa jos trosi.',
     '- Proizvodi (product_*): brojevi su po proizvodu za trziste feeda (market). product_spend_no_sale = troseno u Google Ads bez kupovine u GA4; product_meta_no_sale = isto za Metu (katalog), predlozi iskljucenje iz product seta; product_no_ads i product_gone_spending racunaju Google Ads i Metu zajedno (google_after, meta_after); predlozi proveru cene, velicina i stranice i izdvajanje custom labelom. product_no_ads = prodaje se bez oglasa; predlozi izdvajanje (bestseller). product_gone_spending = nema na stanju, a oglasi trose; Merchant Center kasni. product_price_drop = posle poskupljenja ili kraja akcije pala prodaja (per_day_before, per_day_after). feed_wave = feed nije preuzet, izgleda pokvareno ili se mnogo promenio. Pomeni 2-3 najveca proizvoda po imenu.',
@@ -323,6 +324,8 @@ function titleFor(c: Candidate): string {
       return `${NET[e.network]} ${short(e.campaign)}: ${eur(e.spend)} ${dm(e.date)} naspram uobičajenih ${eur(e.baseline_same_weekday)} (${e.change_pct > 0 ? '+' : ''}${e.change_pct}%)`
     case 'tracking':
       return `${NET[e.network]}: ${eur(e.spend)} troška i 0 konverzija ${dm(e.date)}`
+    case 'ga4_gap':
+      return `Google Ads i GA4 se razlikuju ${e.gap_pct}% (${dm(e.from_date)}–${dm(e.to_date)}): Google ${eur(e.google_value)}, GA4 ${eur(e.ga4_revenue)}; inače ${e.usual_gap_pct}%`
     case 'conv_drop':
       return `${NET[e.network]} konverzije ${dm(e.date)}: ${fmt1(e.conversions)} naspram uobičajenih ${fmt1(e.baseline_conversions)} (${e.change_pct}%)`
     case 'meta_cap':
@@ -394,6 +397,9 @@ function fallbackFor(c: Candidate): { detail: string; proposal: string } {
       return { detail: 'Prosečne dnevne kupovine pre i posle promene cene su ispod.', proposal: 'Proveriti sa klijentom da li je promena cene namerna; razmotriti vraćanje akcije ili manji budžet za te proizvode.' }
     case 'feed_wave':
       return { detail: e.error ? String(e.error) : 'Zbir promena iz provera feeda u poslednja 24 sata.', proposal: 'Proveriti feed i Merchant Center pre nego što promene stignu u kampanje.' }
+    case 'ga4_gap':
+      return { detail: `Vrednost konverzija u Google Ads naspram GA4 prihoda iz google / cpc, ${dm(e.from_date)}–${dm(e.to_date)}; u 4 nedelje pre toga razlika je bila ${e.usual_gap_pct}%.`,
+        proposal: e.lower === 'google' ? 'Google beleži manje nego GA4: proveriti konverzione akcije (primary, tag na sajtu, consent) u Google Ads.' : 'GA4 beleži manje nego Google: proveriti GA4 tag i consent na sajtu i auto-tagging (gclid).' }
     case 'ga4_tracking':
       return { detail: 'Poređenje poslednjih 7 dana sa prethodne 4 nedelje.', proposal: 'Proveriti UTM parametre, auto-tagging (gclid) i consent podešavanja sa tracking timom.' }
     case 'pacing':
@@ -663,7 +669,7 @@ async function reviewClient(clientId: string, clientName: string, params: Record
       .in('fn', ['google-ads-sync', 'facebook-ads-sync']).eq('body->>client_id', clientId)
     const unfinished = (jobs ?? []).some((j) => j.status !== 'done')
     const stale = !lastLoad || lastLoad.slice(0, 10) < runDate || unfinished
-    if (stale) candidates = candidates.filter((c) => !['spend_anomaly', 'tracking', 'conv_drop'].includes(c.check_type))
+    if (stale) candidates = candidates.filter((c) => !['spend_anomaly', 'tracking', 'conv_drop', 'ga4_gap'].includes(c.check_type))
 
     // Accounts that normally see under one conversion a day: a day with zero is not news.
     // A drop must also show on the day before: the last day's conversions keep arriving for days.
@@ -680,6 +686,11 @@ async function reviewClient(clientId: string, clientName: string, params: Record
     const { data: pc, error: pe } = await sb.rpc('product_candidates', { p_client_id: clientId })
     if (pe) throw pe
     candidates.push(...((pc ?? []) as Candidate[]))
+    if (!stale) {
+      const { data: gg, error: ge } = await sb.rpc('ga4_gap_candidates', { p_client_id: clientId })
+      if (ge) throw ge
+      candidates.push(...((gg ?? []) as Candidate[]))
+    }
     if (weekly) {
       const { data: wc, error: we } = await sb.rpc('weekly_candidates', { p_client_id: clientId })
       if (we) throw we
