@@ -131,6 +131,8 @@ Deno.serve(async (req) => {
       const name = (s.clients as unknown as { name: string })?.name ?? ''
       try {
         const found = await checkClient(s.client_id, name, cfg, now.date, hour)
+        // A test run (dry_run) only reports what it would send; nothing is stored or posted.
+        if (body.dry_run) { results.push({ client: name, would_send: found.map((a) => a.text) }); continue }
         let sent = 0
         for (const a of found) {
           // Once a day per alarm (the unique key decides); one that failed to send is tried again on the next run.
@@ -140,7 +142,6 @@ Deno.serve(async (req) => {
             const { error } = await sb.from('urgent_alerts').insert({ client_id: s.client_id, alert_date: now.date, kind: a.kind, key: a.key, text: a.text, payload: a.payload })
             if (error) continue
           }
-          if (body.dry_run) continue
           const r = await fetch(SLACK_FN, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': slackKey ?? '' },
             body: JSON.stringify({ action: 'post', channel: cfg.channel, mention_channel: cfg.mention_channel !== false, text: `:rotating_light: ${a.text}` }) })
           const j = await r.json().catch(() => ({}))
