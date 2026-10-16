@@ -89,10 +89,17 @@ export default function Budgets() {
     })
   }, [])
 
+  const [mediaPlan, setMediaPlan] = useState<Record<string, number>>({})
+
   async function loadPlan() {
     if (!clientId) return
     setLoading(true)
     const { data, error } = await supabase.rpc('budget_plan', { p_client_id: clientId, p_month: month })
+    // The month's total per network from the media plan, shown when no campaign budgets are entered here.
+    const { data: mp } = await supabase.from('media_plan_lines').select('network, budget_total').eq('client_id', clientId).eq('month', month)
+    const byNet: Record<string, number> = {}
+    for (const l of mp ?? []) byNet[l.network] = (byNet[l.network] ?? 0) + Number(l.budget_total)
+    setMediaPlan(byNet)
     setLoading(false)
     if (error) { setMessage({ kind: 'err', text: error.message }); return }
     setRows((data ?? []) as Row[])
@@ -239,7 +246,10 @@ export default function Budgets() {
             {(['google', 'meta'] as const).filter((n) => totals[n]).map((n) => (
               <div key={n} className="rounded border border-[var(--color-line)] bg-white p-4 md:col-span-2">
                 <p className="text-xs text-[var(--color-ink-soft)]">{n === 'google' ? 'Google' : 'Meta'} · budžet / potrošeno / projekcija ({cur})</p>
-                <p className="font-display mt-1 text-2xl">{n0(totals[n].budget)} / {n0(totals[n].spent)} / {n0(totals[n].projected)}</p>
+                <p className="font-display mt-1 text-2xl">{totals[n].budget > 0 ? n0(totals[n].budget) : mediaPlan[n] ? n0(mediaPlan[n]) : '—'} / {n0(totals[n].spent)} / {n0(totals[n].projected)}</p>
+                {!(totals[n].budget > 0) && (
+                  <p className="mt-1 text-xs text-[var(--color-ink-soft)]">{mediaPlan[n] ? 'Budžet iz media plana; po kampanjama nije unet ovde.' : 'Budžet nije unet ni ovde ni u media planu.'}</p>
+                )}
               </div>
             ))}
           </section>
