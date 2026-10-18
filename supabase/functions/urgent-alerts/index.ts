@@ -72,7 +72,21 @@ async function checkClient(clientId: string, name: string, cfg: Record<string, u
   const mAcc = await account(clientId, 'facebook')
   // deno-lint-ignore no-explicit-any
   let gRows: any[] = []
-  if (gAcc) gRows = await windsor('google_ads', gAcc, 'date,campaign,spend', day)
+  // Today's Google spend for the whole account: the fresh number the per-campaign rows are checked against.
+  let gTotal = 0
+  if (gAcc) {
+    gTotal = (await windsor('google_ads', gAcc, 'date,spend', day)).reduce((s, r) => s + (Number(r.spend) || 0), 0)
+    gRows = await windsor('google_ads', gAcc, 'date,campaign,spend', day)
+    // Windsor caches each field combination; when the per-campaign total lags the account total, ask again with the
+    // fields in another order (a separate cache entry). Still lagging: the budget check is skipped and noted.
+    const sum = (rows: { spend?: unknown }[]) => rows.reduce((s, r) => s + (Number(r.spend) || 0), 0)
+    const lags = (rows: { spend?: unknown }[]) => gTotal - sum(rows) > Math.max(5, gTotal * 0.05)
+    if (lags(gRows)) {
+      const again = await windsor('google_ads', gAcc, 'campaign,spend,date', day)
+      if (!lags(again)) gRows = again
+      else { notes.push(`${name} · google: trošak po kampanjama (${eur(sum(gRows))}) zaostaje za nalogom (${eur(gTotal)}), provera budžeta preskočena`); gRows = [] }
+    }
+  }
 
   // 1. Spend today, no purchases. A reading is taken every hour (9-21h) for accounts that usually sell; the alarm goes
   //    out at the configured hours only when this reading and the one an hour earlier both show 0 purchases and the
@@ -90,7 +104,7 @@ async function checkClient(clientId: string, name: string, cfg: Record<string, u
       // Account-level totals: Windsor caches each field combination separately, and the per-campaign answer was seen
       // returning the morning's numbers hours later while the account-level one was current.
       if (net === 'google') {
-        spend = (await windsor('google_ads', acc, 'date,spend', day)).reduce((s, r) => s + (Number(r.spend) || 0), 0)
+        spend = gTotal
         purchases = (await windsor('google_ads', acc, 'date,conversion_action_name,conversions', day)).filter(isPurchase).reduce((s, r) => s + (Number(r.conversions) || 0), 0)
       } else {
         const rows = await windsor('facebook', acc, 'date,spend,actions_omni_purchase', day)
