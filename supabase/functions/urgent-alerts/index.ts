@@ -199,7 +199,7 @@ async function checkClient(clientId: string, name: string, cfg: Record<string, u
 
 // Reactions on a sent alarm: who took it, who solved it, who marked it a false alarm. Read every hour for the alarms of
 // the last two days that are not closed; an alarm nobody took within reminder_hours gets one reminder in its thread.
-const HOW_TO_REACT = '_Reaguj: :eyes: preuzimam · :white_check_mark: rešeno · :x: lažna uzbuna_'
+const HOW_TO_REACT = '_Klikni ispod: :eyes: preuzimam · :white_check_mark: rešeno · :x: lažna uzbuna_'
 const TAKE = ['eyes'], DONE = ['white_check_mark', 'heavy_check_mark', 'ballot_box_with_check'], FALSE = ['x', 'no_entry_sign']
 async function followUp(slackKey: string) {
   const since = new Date(Date.now() - 2 * 864e5).toISOString().slice(0, 10)
@@ -265,7 +265,7 @@ Deno.serve(async (req) => {
             if (error) continue
           }
           const r = await fetch(SLACK_FN, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': slackKey ?? '' },
-            body: JSON.stringify({ action: 'post', channel: cfg.channel, mention_channel: cfg.mention_channel !== false, text: `:rotating_light: ${a.text}\n${HOW_TO_REACT}` }) })
+            body: JSON.stringify({ action: 'post', channel: cfg.channel, mention_channel: cfg.mention_channel !== false, text: `:rotating_light: ${a.text}\n${HOW_TO_REACT}`, add_reactions: ['eyes', 'white_check_mark', 'x'] }) })
           const j = await r.json().catch(() => ({}))
           await sb.from('urgent_alerts').update({ sent_at: j.ok ? new Date().toISOString() : null, error: j.ok ? null : String(j.error ?? r.status), slack_channel: j.ok ? String(cfg.channel) : null, slack_ts: j.ok ? j.ts : null })
             .eq('client_id', s.client_id).eq('alert_date', now.date).eq('kind', a.kind).eq('key', a.key)

@@ -2,7 +2,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2.56.0'
 
 // PPC alarms from Brain to Slack, through Feed Hub's Slack bot (the bot token stays here).
 // Auth: x-api-key checked against external_api_keys (scope slack:notify). Only the channels in ALLOWED.
-// Actions: whoami | ensure_channel { name } | post { channel, text, mention_channel?, thread_ts? }
+// Actions: whoami | ensure_channel { name } | post { channel, text, mention_channel?, thread_ts?, add_reactions? }
 //          | reactions { channel, ts } (who reacted with what, by name; needs reactions:read and users:read)
 
 const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
@@ -89,7 +89,10 @@ Deno.serve(async (req) => {
       const r = await slack('reactions.get', { channel: ch.id, timestamp: String(body.ts ?? ''), full: true })
       if (!r.ok) return json({ error: `reactions.get: ${r.error}${r.needed ? ` (treba ${r.needed})` : ''}` }, 502)
       // deno-lint-ignore no-explicit-any
-      const list = (r.message?.reactions ?? []) as any[]
+      const all = (r.message?.reactions ?? []) as any[]
+      // The bot's own reactions (added so people can click them) are not anybody's answer.
+      const me = (await slack('auth.test', {})).user_id
+      const list = all.map((x) => ({ ...x, users: (x.users ?? []).filter((id: string) => id !== me) })).filter((x) => x.users.length)
       const ids = [...new Set(list.flatMap((x) => x.users ?? []))] as string[]
       const names: Record<string, string> = {}
       for (const id of ids) {
@@ -104,7 +107,14 @@ Deno.serve(async (req) => {
       const full = (body.mention_channel ? '<!channel> ' : '') + text
       const r = await slack('chat.postMessage', { channel: ch.id, text: full, unfurl_links: false, unfurl_media: false, ...(body.thread_ts ? { thread_ts: String(body.thread_ts) } : {}) })
       if (!r.ok) return json({ error: `chat.postMessage: ${r.error}${r.needed ? ` (treba ${r.needed})` : ''}` }, 502)
-      return json({ ok: true, channel: ch.id, created: ch.created, ts: r.ts })
+      // Reactions put on the message by the bot, so the team answers with one click (needs reactions:write).
+      const added: string[] = []
+      let reactError: string | null = null
+      for (const name of (Array.isArray(body.add_reactions) ? body.add_reactions : []).slice(0, 5)) {
+        const a = await slack('reactions.add', { channel: ch.id, timestamp: r.ts, name: String(name) })
+        if (a.ok) added.push(String(name)); else reactError ??= `reactions.add: ${a.error}${a.needed ? ` (treba ${a.needed})` : ''}`
+      }
+      return json({ ok: true, channel: ch.id, created: ch.created, ts: r.ts, reactions_added: added, reactions_error: reactError })
     }
     return json({ error: `unknown action ${body.action}` }, 400)
   } catch (e) {
