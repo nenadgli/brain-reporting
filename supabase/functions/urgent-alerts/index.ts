@@ -77,12 +77,15 @@ async function checkClient(clientId: string, name: string, cfg: Record<string, u
   if (gAcc) {
     gTotal = (await windsor('google_ads', gAcc, 'date,spend', day)).reduce((s, r) => s + (Number(r.spend) || 0), 0)
     gRows = await windsor('google_ads', gAcc, 'date,campaign,spend', day)
-    // Windsor caches each field combination; when the per-campaign total lags the account total, ask again with the
-    // fields in another order (a separate cache entry). Still lagging: the budget check is skipped and noted.
+    // Windsor caches each field combination (the order of the fields does not matter); when the per-campaign total lags
+    // the account total, ask again with a pair of extra fields that changes every hour, so it is a new combination.
+    // Still lagging: the budget check is skipped and noted.
     const sum = (rows: { spend?: unknown }[]) => rows.reduce((s, r) => s + (Number(r.spend) || 0), 0)
     const lags = (rows: { spend?: unknown }[]) => gTotal - sum(rows) > Math.max(5, gTotal * 0.05)
     if (lags(gRows)) {
-      const again = await windsor('google_ads', gAcc, 'campaign,spend,date', day)
+      const extra = ['impressions', 'clicks', 'conversions', 'ctr', 'cpc', 'conversion_value']
+      const pairs = extra.flatMap((a, i) => extra.slice(i + 1).map((b) => `${a},${b}`))
+      const again = await windsor('google_ads', gAcc, `date,campaign,spend,${pairs[hour % pairs.length]}`, day)
       if (!lags(again)) gRows = again
       else { notes.push(`${name} · google: trošak po kampanjama (${eur(sum(gRows))}) zaostaje za nalogom (${eur(gTotal)}), provera budžeta preskočena`); gRows = [] }
     }
