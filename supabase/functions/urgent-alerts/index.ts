@@ -197,6 +197,38 @@ async function checkClient(clientId: string, name: string, cfg: Record<string, u
   return alerts
 }
 
+// Reactions on a sent alarm: who took it, who solved it, who marked it a false alarm. Read every hour for the alarms of
+// the last two days that are not closed; an alarm nobody took within reminder_hours gets one reminder in its thread.
+const HOW_TO_REACT = '_Reaguj: :eyes: preuzimam · :white_check_mark: rešeno · :x: lažna uzbuna_'
+const TAKE = ['eyes'], DONE = ['white_check_mark', 'heavy_check_mark', 'ballot_box_with_check'], FALSE = ['x', 'no_entry_sign']
+async function followUp(slackKey: string) {
+  const since = new Date(Date.now() - 2 * 864e5).toISOString().slice(0, 10)
+  const { data: open } = await sb.from('urgent_alerts').select('client_id, alert_date, kind, key, slack_channel, slack_ts, sent_at, taken_by, reminded_at')
+    .gte('alert_date', since).not('slack_ts', 'is', null).is('resolved_at', null).is('false_alarm_by', null)
+  const call = async (b: Record<string, unknown>) => (await fetch(SLACK_FN, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': slackKey }, body: JSON.stringify(b) })).json().catch(() => ({}))
+  let read = 0, reminded = 0
+  let firstError: string | null = null
+  for (const a of open ?? []) {
+    const r = await call({ action: 'reactions', channel: a.slack_channel, ts: a.slack_ts })
+    if (!r.ok) { firstError ??= String(r.error ?? 'reactions'); continue }
+    read++
+    const by = (names: string[]) => ((r.reactions ?? []) as { name: string; users: string[] }[]).filter((x) => names.includes(x.name)).flatMap((x) => x.users)
+    const now = new Date().toISOString()
+    const patch: Record<string, unknown> = {}
+    const taken = by(TAKE), done = by(DONE), wrong = by(FALSE)
+    if (taken.length && !a.taken_by) Object.assign(patch, { taken_by: taken.join(', '), taken_at: now })
+    if (done.length) Object.assign(patch, { resolved_by: done.join(', '), resolved_at: now })
+    if (wrong.length) Object.assign(patch, { false_alarm_by: wrong.join(', ') })
+    const reminderHours = 2
+    if (!taken.length && !done.length && !wrong.length && !a.reminded_at && Date.parse(a.sent_at) < Date.now() - reminderHours * 36e5) {
+      const p = await call({ action: 'post', channel: a.slack_channel, thread_ts: a.slack_ts, text: `Niko još nije preuzeo ovaj alarm (${reminderHours} h). Ko ga gleda, neka stavi :eyes:.` })
+      if (p.ok) { patch.reminded_at = now; reminded++ }
+    }
+    if (Object.keys(patch).length) await sb.from('urgent_alerts').update(patch).eq('client_id', a.client_id).eq('alert_date', a.alert_date).eq('kind', a.kind).eq('key', a.key)
+  }
+  return { open: open?.length ?? 0, read, reminded, error: firstError }
+}
+
 Deno.serve(async (req) => {
   try {
     const internal = req.headers.get('x-internal-key')
@@ -233,9 +265,9 @@ Deno.serve(async (req) => {
             if (error) continue
           }
           const r = await fetch(SLACK_FN, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': slackKey ?? '' },
-            body: JSON.stringify({ action: 'post', channel: cfg.channel, mention_channel: cfg.mention_channel !== false, text: `:rotating_light: ${a.text}` }) })
+            body: JSON.stringify({ action: 'post', channel: cfg.channel, mention_channel: cfg.mention_channel !== false, text: `:rotating_light: ${a.text}\n${HOW_TO_REACT}` }) })
           const j = await r.json().catch(() => ({}))
-          await sb.from('urgent_alerts').update({ sent_at: j.ok ? new Date().toISOString() : null, error: j.ok ? null : String(j.error ?? r.status) })
+          await sb.from('urgent_alerts').update({ sent_at: j.ok ? new Date().toISOString() : null, error: j.ok ? null : String(j.error ?? r.status), slack_channel: j.ok ? String(cfg.channel) : null, slack_ts: j.ok ? j.ts : null })
             .eq('client_id', s.client_id).eq('alert_date', now.date).eq('kind', a.kind).eq('key', a.key)
           if (j.ok) sent++
         }
@@ -244,7 +276,8 @@ Deno.serve(async (req) => {
         results.push({ client: name, error: (e as Error).message })
       }
     }
-    return json({ ok: true, date: now.date, hour, results })
+    const followup = body.dry_run ? null : await followUp(slackKey ?? '').catch((e) => ({ error: (e as Error).message }))
+    return json({ ok: true, date: now.date, hour, results, followup })
   } catch (e) {
     return json({ error: (e as Error).message }, 500)
   }

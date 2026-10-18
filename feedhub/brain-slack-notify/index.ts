@@ -2,7 +2,8 @@ import { createClient } from 'npm:@supabase/supabase-js@2.56.0'
 
 // PPC alarms from Brain to Slack, through Feed Hub's Slack bot (the bot token stays here).
 // Auth: x-api-key checked against external_api_keys (scope slack:notify). Only the channels in ALLOWED.
-// Actions: whoami | ensure_channel { name } | post { channel, text, mention_channel? }
+// Actions: whoami | ensure_channel { name } | post { channel, text, mention_channel?, thread_ts? }
+//          | reactions { channel, ts } (who reacted with what, by name; needs reactions:read and users:read)
 
 const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
 const TOKEN = Deno.env.get('SLACK_BOT_TOKEN') ?? ''
@@ -84,11 +85,24 @@ Deno.serve(async (req) => {
     if ('error' in ch) return json(ch, 502)
 
     if (body.action === 'ensure_channel') return json(ch)
+    if (body.action === 'reactions') {
+      const r = await slack('reactions.get', { channel: ch.id, timestamp: String(body.ts ?? ''), full: true })
+      if (!r.ok) return json({ error: `reactions.get: ${r.error}${r.needed ? ` (treba ${r.needed})` : ''}` }, 502)
+      // deno-lint-ignore no-explicit-any
+      const list = (r.message?.reactions ?? []) as any[]
+      const ids = [...new Set(list.flatMap((x) => x.users ?? []))] as string[]
+      const names: Record<string, string> = {}
+      for (const id of ids) {
+        const u = await slack('users.info', { user: id })
+        names[id] = u.ok ? (u.user?.profile?.display_name || u.user?.real_name || id) : id
+      }
+      return json({ ok: true, reactions: list.map((x) => ({ name: x.name, users: (x.users ?? []).map((id: string) => names[id] ?? id) })) })
+    }
     if (body.action === 'post') {
       const text = String(body.text ?? '').slice(0, 3500)
       if (!text) return json({ error: 'text je obavezan' }, 400)
       const full = (body.mention_channel ? '<!channel> ' : '') + text
-      const r = await slack('chat.postMessage', { channel: ch.id, text: full, unfurl_links: false, unfurl_media: false })
+      const r = await slack('chat.postMessage', { channel: ch.id, text: full, unfurl_links: false, unfurl_media: false, ...(body.thread_ts ? { thread_ts: String(body.thread_ts) } : {}) })
       if (!r.ok) return json({ error: `chat.postMessage: ${r.error}${r.needed ? ` (treba ${r.needed})` : ''}` }, 502)
       return json({ ok: true, channel: ch.id, created: ch.created, ts: r.ts })
     }
