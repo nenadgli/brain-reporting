@@ -87,11 +87,13 @@ async function checkClient(clientId: string, name: string, cfg: Record<string, u
       const acc = net === 'google' ? gAcc : mAcc
       if (!acc || base[net] < minBase) continue
       let spend = 0, purchases = 0
+      // Account-level totals: Windsor caches each field combination separately, and the per-campaign answer was seen
+      // returning the morning's numbers hours later while the account-level one was current.
       if (net === 'google') {
-        spend = gRows.reduce((s, r) => s + (Number(r.spend) || 0), 0)
-        purchases = (await windsor('google_ads', acc, 'date,campaign,conversion_action_name,conversions', day)).filter(isPurchase).reduce((s, r) => s + (Number(r.conversions) || 0), 0)
+        spend = (await windsor('google_ads', acc, 'date,spend', day)).reduce((s, r) => s + (Number(r.spend) || 0), 0)
+        purchases = (await windsor('google_ads', acc, 'date,conversion_action_name,conversions', day)).filter(isPurchase).reduce((s, r) => s + (Number(r.conversions) || 0), 0)
       } else {
-        const rows = await windsor('facebook', acc, 'date,campaign,spend,actions_omni_purchase', day)
+        const rows = await windsor('facebook', acc, 'date,spend,actions_omni_purchase', day)
         spend = rows.reduce((s, r) => s + (Number(r.spend) || 0), 0)
         purchases = rows.reduce((s, r) => s + (Number(r.actions_omni_purchase) || 0), 0)
       }
