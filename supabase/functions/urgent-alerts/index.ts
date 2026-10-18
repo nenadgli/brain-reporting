@@ -2,7 +2,8 @@ import { createClient } from 'jsr:@supabase/supabase-js@2'
 
 // Hitni PPC alarmi tokom dana, na Slack (#ppc-alarm) preko Feed Hub bota. Pokreće ga cron svakog sata 8–22h
 // (Beograd); svaki alarm ide najviše jednom dnevno (tabela urgent_alerts). Samo klijenti sa params.alerts.
-// - no_conversions: trošak danas, a 0 kupovina, u 12h i 16h; samo nalozi koji inače imaju bar min_baseline kupovina dnevno.
+// - no_conversions: u 12h i 16h platforma prijavljuje 0 kupovina, i sat ranije takođe 0, a trošak se u međuvremenu pomerio
+//   (inače su podaci zaglavljeni); samo nalozi koji inače imaju bar min_baseline kupovina dnevno (samo purchase akcije).
 // - overspend: Google kampanja je danas potrošila bar overspend_ratio × dnevni budžet; na Meti kampanja (CBO) ili ad set
 //   bar meta_overspend_ratio × svoj dnevni budžet.
 // - landing_down: landing strana aktivnog oglasa ne postoji (404/410), server greška (5xx) ili ne odgovara; jedna poruka
@@ -31,8 +32,8 @@ async function secret(name: string) {
 }
 
 // deno-lint-ignore no-explicit-any
-async function windsor(connector: string, account: string, fields: string, day: string): Promise<any[]> {
-  const p = new URLSearchParams({ api_key: WINDSOR_API_KEY, select_accounts: account, fields, date_from: day, date_to: day })
+async function windsor(connector: string, account: string, fields: string, day: string, dayTo = day): Promise<any[]> {
+  const p = new URLSearchParams({ api_key: WINDSOR_API_KEY, select_accounts: account, fields, date_from: day, date_to: dayTo })
   const r = await fetch(`https://connectors.windsor.ai/${connector}?${p}`, { signal: AbortSignal.timeout(90000) })
   if (!r.ok) throw new Error(`Windsor ${connector} HTTP ${r.status}`)
   return (await r.json()).data ?? []
@@ -43,16 +44,29 @@ async function account(clientId: string, provider: string) {
   return data?.[0] ? String(data[0].windsor_connection_id).split('__').pop()! : null
 }
 
-// Usual purchases per day over the last 28 days, per network (summed in the database).
-async function baseline(clientId: string) {
-  const { data, error } = await sb.rpc('daily_purchases_baseline', { p_client_id: clientId })
-  if (error) throw error
+// Usual purchases per day over the last 28 days, counted from purchase conversion actions only (Google's conversions
+// column in the database holds every action, which made "~140 purchases a day" out of add-to-carts). From Windsor,
+// once a day per account, kept in alert_baselines.
+const isPurchase = (r: { conversion_action_name?: unknown }) => /purchase|kupovin/i.test(String(r.conversion_action_name ?? ''))
+async function purchaseBaseline(clientId: string, gAcc: string | null, mAcc: string | null, day: string) {
   const out: Record<string, number> = { google: 0, meta: 0 }
-  for (const r of (data ?? []) as { network: string; per_day: number }[]) out[r.network] = Number(r.per_day) || 0
+  const { data } = await sb.from('alert_baselines').select('network, computed_on, purchases_per_day').eq('client_id', clientId)
+  const from = new Date(Date.parse(day) - 28 * 864e5).toISOString().slice(0, 10)
+  const to = new Date(Date.parse(day) - 864e5).toISOString().slice(0, 10)
+  for (const [net, acc] of [['google', gAcc], ['meta', mAcc]] as const) {
+    if (!acc) continue
+    const kept = (data ?? []).find((b) => b.network === net)
+    if (kept && kept.computed_on === day) { out[net] = Number(kept.purchases_per_day); continue }
+    const rows = net === 'google'
+      ? (await windsor('google_ads', acc, 'date,conversion_action_name,conversions', from, to)).filter(isPurchase).map((r) => Number(r.conversions) || 0)
+      : (await windsor('facebook', acc, 'date,actions_omni_purchase', from, to)).map((r) => Number(r.actions_omni_purchase) || 0)
+    out[net] = rows.reduce((a, b) => a + b, 0) / 28
+    await sb.from('alert_baselines').upsert({ client_id: clientId, network: net, computed_on: day, purchases_per_day: out[net] })
+  }
   return out
 }
 
-async function checkClient(clientId: string, name: string, cfg: Record<string, unknown>, day: string, hour: number): Promise<Alert[]> {
+async function checkClient(clientId: string, name: string, cfg: Record<string, unknown>, day: string, hour: number, dry: boolean, notes: string[]): Promise<Alert[]> {
   const alerts: Alert[] = []
   const gAcc = await account(clientId, 'google_ads')
   const mAcc = await account(clientId, 'facebook')
@@ -60,25 +74,38 @@ async function checkClient(clientId: string, name: string, cfg: Record<string, u
   let gRows: any[] = []
   if (gAcc) gRows = await windsor('google_ads', gAcc, 'date,campaign,spend', day)
 
-  // 1. Spend today, no purchases (at the configured hours only).
-  const convHours = (cfg.no_conv_hours ?? [12, 16]) as number[]
-  if (convHours.includes(hour)) {
-    const base = await baseline(clientId)
+  // 1. Spend today, no purchases. A reading is taken every hour (9-21h) for accounts that usually sell; the alarm goes
+  //    out at the configured hours only when this reading and the one an hour earlier both show 0 purchases and the
+  //    spend moved in between. Unchanged spend means Windsor is returning a stuck picture of the day: that is not
+  //    sent as a PPC alarm, only reported in the run result.
+  if (hour >= 9 && hour <= 21) {
+    const convHours = (cfg.no_conv_hours ?? [12, 16]) as number[]
     const minSpend = Number(cfg.no_conv_min_spend ?? 30)
     const minBase = Number(cfg.min_baseline ?? 10)
-    if (gAcc && base.google >= minBase) {
-      const conv = await windsor('google_ads', gAcc, 'date,campaign,conversion_action_name,conversions', day)
-      const purchases = conv.filter((r) => String(r.conversion_action_name ?? '').toLowerCase().includes('purchase')).reduce((s, r) => s + (Number(r.conversions) || 0), 0)
-      const spend = gRows.reduce((s, r) => s + (Number(r.spend) || 0), 0)
-      if (spend >= minSpend && purchases === 0) alerts.push({ kind: 'no_conversions', key: `google:${hour}`, payload: { network: 'google', spend, purchases, baseline: base.google, hour },
-        text: `*${name} · Google:* ${eur(spend)} troška danas do ${hour}h, a 0 kupovina (inače ~${Math.round(base.google)} kupovina dnevno). Proveriti tracking i sajt.` })
-    }
-    if (mAcc && base.meta >= minBase) {
-      const rows = await windsor('facebook', mAcc, 'date,campaign,spend,actions_omni_purchase', day)
-      const spend = rows.reduce((s, r) => s + (Number(r.spend) || 0), 0)
-      const purchases = rows.reduce((s, r) => s + (Number(r.actions_omni_purchase) || 0), 0)
-      if (spend >= minSpend && purchases === 0) alerts.push({ kind: 'no_conversions', key: `meta:${hour}`, payload: { network: 'meta', spend, purchases, baseline: base.meta, hour },
-        text: `*${name} · Meta:* ${eur(spend)} troška danas do ${hour}h, a 0 kupovina (inače ~${Math.round(base.meta)} kupovina dnevno). Proveriti pixel i sajt.` })
+    const base = await purchaseBaseline(clientId, gAcc, mAcc, day)
+    for (const net of ['google', 'meta'] as const) {
+      const acc = net === 'google' ? gAcc : mAcc
+      if (!acc || base[net] < minBase) continue
+      let spend = 0, purchases = 0
+      if (net === 'google') {
+        spend = gRows.reduce((s, r) => s + (Number(r.spend) || 0), 0)
+        purchases = (await windsor('google_ads', acc, 'date,campaign,conversion_action_name,conversions', day)).filter(isPurchase).reduce((s, r) => s + (Number(r.conversions) || 0), 0)
+      } else {
+        const rows = await windsor('facebook', acc, 'date,campaign,spend,actions_omni_purchase', day)
+        spend = rows.reduce((s, r) => s + (Number(r.spend) || 0), 0)
+        purchases = rows.reduce((s, r) => s + (Number(r.actions_omni_purchase) || 0), 0)
+      }
+      const { data: prev } = await sb.from('urgent_alert_readings').select('spend, purchases').eq('client_id', clientId).eq('network', net).eq('reading_date', day).eq('hour', hour - 1).maybeSingle()
+      if (!dry) await sb.from('urgent_alert_readings').upsert({ client_id: clientId, network: net, reading_date: day, hour, spend, purchases })
+      if (!convHours.includes(hour) || spend < minSpend || purchases > 0) continue
+      if (!prev) { notes.push(`${name} · ${net}: nema čitanja iz ${hour - 1}h, alarm preskočen`); continue }
+      const moved = spend - Number(prev.spend)
+      if (moved < Math.max(1, Number(prev.spend) * 0.02)) { notes.push(`${name} · ${net}: trošak se nije pomerio od ${hour - 1}h (${eur(spend)}), Windsor podaci zaglavljeni`); continue }
+      if (Number(prev.purchases) > 0) continue
+      const label = net === 'google' ? 'Google Ads' : 'Meta'
+      alerts.push({ kind: 'no_conversions', key: `${net}:${hour}`, payload: { network: net, spend, purchases, baseline: base[net], hour, spend_last_hour: moved },
+        text: `*${name} · ${label}:* prijavljuje 0 kupovina danas do ${hour}h uz ${eur(spend)} troška, i u poslednjih sat vremena (+${eur(moved)}) i dalje 0; inače ~${Math.round(base[net])} kupovina dnevno. ` +
+          (net === 'google' ? 'Google konverzije kasne nekoliko sati: proveriti u Google Ads i GA4 da li kupovine stižu, pa tag i sajt.' : 'Proveriti u Ads Manageru da li kupovine stižu, pa pixel i sajt.') })
     }
   }
 
@@ -173,9 +200,10 @@ Deno.serve(async (req) => {
       if (body.client_id && body.client_id !== s.client_id) continue
       const name = (s.clients as unknown as { name: string })?.name ?? ''
       try {
-        const found = await checkClient(s.client_id, name, cfg, now.date, hour)
+        const notes: string[] = []
+        const found = await checkClient(s.client_id, name, cfg, now.date, hour, !!body.dry_run, notes)
         // A test run (dry_run) only reports what it would send; nothing is stored or posted.
-        if (body.dry_run) { results.push({ client: name, would_send: found.map((a) => a.text) }); continue }
+        if (body.dry_run) { results.push({ client: name, would_send: found.map((a) => a.text), notes }); continue }
         let sent = 0
         for (const a of found) {
           // Once a day per alarm (the unique key decides); one that failed to send is tried again on the next run.
@@ -192,7 +220,7 @@ Deno.serve(async (req) => {
             .eq('client_id', s.client_id).eq('alert_date', now.date).eq('kind', a.kind).eq('key', a.key)
           if (j.ok) sent++
         }
-        results.push({ client: name, found: found.length, sent })
+        results.push({ client: name, found: found.length, sent, notes })
       } catch (e) {
         results.push({ client: name, error: (e as Error).message })
       }
