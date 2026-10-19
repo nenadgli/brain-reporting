@@ -478,7 +478,19 @@ Deno.serve(async (req) => {
         attachment_count: attCount.get(t.productive_id) ?? null,
         ...parseBrief(t.description ?? '', t.created_at),
       }))
-      return json({ briefs })
+      // Not briefs for paid campaigns: newsletters, stories, rules. Undated tasks only while recent (a brief may still
+      // be in its comments). Running and upcoming actions first (soonest start), then past ones (latest first).
+      const today = new Date().toISOString().slice(0, 10)
+      const recent = new Date(Date.now() - 30 * 864e5).toISOString()
+      const keep = briefs.filter((b) => !/(\bNL\b|newsletter|story|stori|pravilnik)/i.test(b.title ?? '') && (b.start_date || (b.created_at ?? '') >= recent))
+      const live = (b: { start_date: string | null; end_date: string | null }) => !!b.start_date && (b.end_date ?? b.start_date) >= today
+      keep.sort((x, y) => {
+        if (live(x) !== live(y)) return live(x) ? -1 : 1
+        if (live(x)) return String(x.start_date).localeCompare(String(y.start_date))
+        if (!x.start_date !== !y.start_date) return x.start_date ? 1 : -1
+        return String(y.start_date ?? y.created_at).localeCompare(String(x.start_date ?? x.created_at))
+      })
+      return json({ briefs: keep })
     }
 
     if (action === 'attachments') {
