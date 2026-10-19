@@ -8,6 +8,7 @@ import VideoCampaignForm from './VideoCampaignForm'
 import DisplayAdForm from './DisplayAdForm'
 import MetaCampaignForm from './MetaCampaignForm'
 import RsaRefresh from './RsaRefresh'
+import DuplicateAction from './DuplicateAction'
 
 type ClientRow = { id: string; name: string; ga4_store: string | null }
 type Draft = {
@@ -120,6 +121,8 @@ export default function CampaignBuilder() {
   const [mode, setMode] = useState<AssetMode>('search')
   // Refreshing existing Search ads is its own screen, without briefs and images.
   const [refresh, setRefresh] = useState(false)
+  // The default view: a new action as a copy of the last one; the single-entity forms are for everything else.
+  const [dup, setDup] = useState(true)
   const [images, setImages] = useState<ImageAsset[]>([])
   const [imageNotes, setImageNotes] = useState<Record<string, string>>({})
 
@@ -516,14 +519,18 @@ export default function CampaignBuilder() {
         </label>
       </header>
 
-      <div className="mb-6 inline-flex rounded border border-[var(--color-line)] bg-white p-0.5 text-sm">
+      <div className="mb-6 inline-flex flex-wrap rounded border border-[var(--color-line)] bg-white p-0.5 text-sm">
+        <button type="button" onClick={() => { setRefresh(false); setDup(true); setMessage(null) }}
+          className={`rounded px-4 py-1.5 ${dup && !refresh ? 'bg-[var(--color-indigo)] text-white' : 'text-[var(--color-ink-soft)]'}`}>
+          Dupliraj prošlu akciju
+        </button>
         {([['search', 'Search kampanja'], ['pmax', 'PMax asset grupa'], ['dg', 'Demand Gen ad grupa'], ['video', 'YouTube video'], ['display', 'Display oglas'], ['meta', 'Meta kampanja']] as const).map(([m, label]) => (
-          <button key={m} type="button" onClick={() => { setRefresh(false); switchMode(m) }}
-            className={`rounded px-4 py-1.5 ${!refresh && mode === m ? 'bg-[var(--color-indigo)] text-white' : 'text-[var(--color-ink-soft)]'}`}>
+          <button key={m} type="button" onClick={() => { setRefresh(false); setDup(false); switchMode(m) }}
+            className={`rounded px-4 py-1.5 ${!refresh && !dup && mode === m ? 'bg-[var(--color-indigo)] text-white' : 'text-[var(--color-ink-soft)]'}`}>
             {label}
           </button>
         ))}
-        <button type="button" onClick={() => { setRefresh(true); setMessage(null) }}
+        <button type="button" onClick={() => { setRefresh(true); setDup(false); setMessage(null) }}
           className={`rounded px-4 py-1.5 ${refresh ? 'bg-[var(--color-indigo)] text-white' : 'text-[var(--color-ink-soft)]'}`}>
           Osvežavanje Search oglasa
         </button>
@@ -574,7 +581,7 @@ export default function CampaignBuilder() {
           >
             {refreshing ? 'Osvežavam…' : '↻ Osveži iz Productive-a'}
           </button>
-          {mode === 'search' && (
+          {mode === 'search' && !dup && (
             <button
               type="button"
               onClick={draftFromBrief}
@@ -649,7 +656,9 @@ export default function CampaignBuilder() {
             <p className="mb-1 text-sm font-medium">Kreative i prilozi{attachments.length ? ` · ${attachments.length}` : ''}</p>
             <p className="mb-3 text-xs text-[var(--color-ink-soft)]">
               Iz taska, podtaskova i komentara, čitaju se direktno iz Productive-a (ništa se ne kopira). Linkovi važe dva sata.
-              {mode === 'meta'
+              {dup
+                ? <>Slike za akciju biraš u planu ispod.</>
+                : mode === 'meta'
                 ? <>Čekiraj slike za Meta oglase ({images.length} izabrano): 1:1 i 4:5 za feed, 9:16 za story i reels.</>
                 : mode !== 'search'
                 ? <>Čekiraj „{mode === 'pmax' ? 'u asset grupu' : 'u oglas'}“ za slike i logotipe ({images.length} izabrano); tip se prepoznaje po dimenzijama.</>
@@ -658,7 +667,7 @@ export default function CampaignBuilder() {
             {attLoading && <p className="text-xs text-[var(--color-ink-soft)]">Učitavam priloge iz Productive-a…</p>}
             {attError && <p className="text-xs text-[var(--color-rust)]">Prilozi nisu učitani: {attError}</p>}
             {!attLoading && !attError && attachments.length === 0 && <p className="text-xs text-[var(--color-ink-soft)]">Task nema priloga.</p>}
-            {attachments.some((a) => (a.content_type ?? '').startsWith('image/')) && (
+            {!dup && attachments.some((a) => (a.content_type ?? '').startsWith('image/')) && (
               <button onClick={() => addAll(attachments)} disabled={addingAll} className="btn-secondary mb-3 text-sm">
                 {addingAll ? 'Proveravam slike…' : `Dodaj sve slike (${attachments.filter((a) => (a.content_type ?? '').startsWith('image/')).length})`}
               </button>
@@ -666,7 +675,7 @@ export default function CampaignBuilder() {
             {groupAttachments(attachments).map(([group, list]) => (
               <div key={group} className="mb-4">
                 <p className="mb-2 flex items-center gap-3 text-xs font-medium text-[var(--color-ink-soft)]">{group} · {list.length}
-                  {list.some((a) => (a.content_type ?? '').startsWith('image/')) && (
+                  {!dup && list.some((a) => (a.content_type ?? '').startsWith('image/')) && (
                     <button onClick={() => addAll(list)} disabled={addingAll} className="font-normal text-[var(--color-indigo)]">dodaj sve iz ove grupe</button>
                   )}
                 </p>
@@ -692,7 +701,7 @@ export default function CampaignBuilder() {
                             {fileSize(a.size_bytes)}
                             {a.productive_url && <> · <a href={a.productive_url} target="_blank" rel="noreferrer" className="underline">Productive</a></>}
                           </span>
-                          {isImage && mode !== 'video' && (
+                          {isImage && !dup && mode !== 'video' && (
                             <label className="mt-1 flex items-center gap-1">
                               <input type="checkbox" checked={picked} onChange={() => toggleImage(a)} />
                               <span>{mode === 'pmax' ? 'u asset grupu' : mode === 'dg' || mode === 'display' || mode === 'meta' ? 'u oglas' : 'u Editor'}</span>
@@ -716,6 +725,9 @@ export default function CampaignBuilder() {
         )}
       </section>
 
+      {dup && client && <DuplicateAction client={client} market={market} brief={brief} attachments={attachments} onMessage={setMessage} />}
+
+      {!dup && <>
       {mode === 'pmax' && client && (
         <PmaxAssetGroupForm
           client={client}
@@ -896,6 +908,7 @@ export default function CampaignBuilder() {
         </div>
       </section>
       </>)}
+      </>}
       </>}
     </div>
   )
