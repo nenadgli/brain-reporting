@@ -197,13 +197,20 @@ async function checkClient(clientId: string, name: string, cfg: Record<string, u
   return alerts
 }
 
+// The owner of the alarm's network for this client (params.owners, by email); landing pages and Google budgets are Google.
+function ownerEmails(params: unknown, a: { payload: Record<string, unknown> }) {
+  const owners = ((params as { owners?: Record<string, string> })?.owners ?? {})
+  const net = String(a.payload?.network ?? 'google')
+  return owners[net] ? [owners[net]] : []
+}
+
 // Reactions on a sent alarm: who took it, who solved it, who marked it a false alarm. Read every hour for the alarms of
 // the last two days that are not closed; an alarm nobody took within reminder_hours gets one reminder in its thread.
 const HOW_TO_REACT = '_Klikni ispod: :eyes: preuzimam · :white_check_mark: rešeno · :x: lažna uzbuna_'
 const TAKE = ['eyes'], DONE = ['white_check_mark', 'heavy_check_mark', 'ballot_box_with_check'], FALSE = ['x', 'no_entry_sign']
 async function followUp(slackKey: string) {
   const since = new Date(Date.now() - 2 * 864e5).toISOString().slice(0, 10)
-  const { data: open } = await sb.from('urgent_alerts').select('client_id, alert_date, kind, key, slack_channel, slack_ts, sent_at, taken_by, reminded_at')
+  const { data: open } = await sb.from('urgent_alerts').select('client_id, alert_date, kind, key, payload, slack_channel, slack_ts, sent_at, taken_by, reminded_at')
     .gte('alert_date', since).not('slack_ts', 'is', null).is('resolved_at', null).is('false_alarm_by', null)
   const call = async (b: Record<string, unknown>) => (await fetch(SLACK_FN, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': slackKey }, body: JSON.stringify(b) })).json().catch(() => ({}))
   let read = 0, reminded = 0
@@ -221,7 +228,8 @@ async function followUp(slackKey: string) {
     if (wrong.length) Object.assign(patch, { false_alarm_by: wrong.join(', ') })
     const reminderHours = 2
     if (!taken.length && !done.length && !wrong.length && !a.reminded_at && Date.parse(a.sent_at) < Date.now() - reminderHours * 36e5) {
-      const p = await call({ action: 'post', channel: a.slack_channel, thread_ts: a.slack_ts, text: `Niko još nije preuzeo ovaj alarm (${reminderHours} h). Ko ga gleda, neka stavi :eyes:.` })
+      const { data: rs } = await sb.from('review_settings').select('params').eq('client_id', a.client_id).maybeSingle()
+      const p = await call({ action: 'post', channel: a.slack_channel, thread_ts: a.slack_ts, mention_emails: ownerEmails(rs?.params, a), text: `Niko još nije preuzeo ovaj alarm (${reminderHours} h). Ko ga gleda, neka stavi :eyes:.` })
       if (p.ok) { patch.reminded_at = now; reminded++ }
     }
     if (Object.keys(patch).length) await sb.from('urgent_alerts').update(patch).eq('client_id', a.client_id).eq('alert_date', a.alert_date).eq('kind', a.kind).eq('key', a.key)
@@ -265,7 +273,7 @@ Deno.serve(async (req) => {
             if (error) continue
           }
           const r = await fetch(SLACK_FN, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': slackKey ?? '' },
-            body: JSON.stringify({ action: 'post', channel: cfg.channel, mention_channel: cfg.mention_channel !== false, text: `:rotating_light: ${a.text}\n${HOW_TO_REACT}`, add_reactions: ['eyes', 'white_check_mark', 'x'] }) })
+            body: JSON.stringify({ action: 'post', channel: cfg.channel, mention_channel: cfg.mention_channel !== false, mention_emails: ownerEmails(s.params, a), text: `:rotating_light: ${a.text}\n${HOW_TO_REACT}`, add_reactions: ['eyes', 'white_check_mark', 'x'] }) })
           const j = await r.json().catch(() => ({}))
           await sb.from('urgent_alerts').update({ sent_at: j.ok ? new Date().toISOString() : null, error: j.ok ? null : String(j.error ?? r.status), slack_channel: j.ok ? String(cfg.channel) : null, slack_ts: j.ok ? j.ts : null })
             .eq('client_id', s.client_id).eq('alert_date', now.date).eq('kind', a.kind).eq('key', a.key)

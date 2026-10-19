@@ -34,6 +34,13 @@ const SEV_LABEL: Record<F['severity'], string> = { hitno: 'Hitno', visoko: 'Važ
 const SEV_ORDER: Record<F['severity'], number> = { hitno: 0, visoko: 1, srednje: 2, info: 3 }
 const STATUS_TEXT: Record<string, string> = { odobreno: 'Odobreno', odbijeno: 'Odbijeno', odlozeno: 'Kasnije', izvrseno: 'Urađeno' }
 
+// The PPC team by email (params.owners holds emails); anyone else shows as the part before the @.
+const PEOPLE: Record<string, string> = {
+  'jelena@loft19.co': 'Jelena', 'aleksandra@loft19.co': 'Aleksandra', 'aleksandar.ilic@loft19.co': 'Aleksandar', 'boris.peric@loft19.co': 'Boris',
+}
+const personName = (email: string) => PEOPLE[email] ?? email.split('@')[0]
+const ownersOf = (c: ClientOpt | undefined) => ((c?.params as { owners?: Record<string, string> })?.owners ?? {})
+
 const weekAgo = () => new Date(Date.now() - 6 * 864e5).toISOString().slice(0, 10)
 
 export default function Today() {
@@ -45,6 +52,10 @@ export default function Today() {
   const [comments, setComments] = useState<Record<string, string>>({})
   const [unchecked, setUnchecked] = useState<Record<string, boolean>>({})
   const [showAll, setShowAll] = useState<Record<string, boolean>>({})
+  // Each person sees their own clients (params.owners) unless they ask for everyone.
+  const [me, setMe] = useState('')
+  const [onlyMine, setOnlyMine] = useState(true)
+  useEffect(() => { supabase.auth.getUser().then(({ data }) => setMe(data.user?.email ?? '')) }, [])
   const [lastRun, setLastRun] = useState<{ run_date: string; data_date: string | null; status: string; finished_at: string | null } | null>(null)
   const [showDone, setShowDone] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
@@ -162,14 +173,27 @@ export default function Today() {
     await loadClient(); loadOverview()
   }
 
-  const totalOpen = Object.values(counts).reduce((n, c) => n + c.open, 0)
+  const isMine = (c: ClientOpt) => !!me && Object.values(ownersOf(c)).includes(me)
+  const hasMine = clients.some(isMine)
+  const shownClients = hasMine && onlyMine ? clients.filter(isMine) : clients
+  const totalOpen = shownClients.reduce((n, c) => n + (counts[c.client_id]?.open ?? 0), 0)
+  const owners = ownersOf(client)
+  // Start on the first of my clients once they are known.
+  useEffect(() => {
+    if (shownClients.length && !shownClients.some((c) => c.client_id === clientId)) setClientId(shownClients[0].client_id)
+  }, [me, onlyMine, clients.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="flex gap-6">
       <aside className="w-60 shrink-0">
-        <p className="mb-2 px-2 text-xs font-medium text-[var(--color-ink-soft)]">Klijenti · {totalOpen} otvorenih</p>
+        <p className="mb-2 px-2 text-xs font-medium text-[var(--color-ink-soft)]">{hasMine && onlyMine ? 'Moji klijenti' : 'Klijenti'} · {totalOpen} otvorenih</p>
+        {hasMine && (
+          <button onClick={() => setOnlyMine(!onlyMine)} className="mb-2 px-2 text-xs text-[var(--color-indigo)]">
+            {onlyMine ? `Prikaži sve klijente (${clients.length})` : 'Samo moji klijenti'}
+          </button>
+        )}
         <ul className="space-y-0.5">
-          {clients.map((c) => {
+          {shownClients.map((c) => {
             const x = counts[c.client_id]
             return (
               <li key={c.client_id}>
@@ -189,6 +213,11 @@ export default function Today() {
         <header className="mb-6 flex flex-wrap items-center gap-3">
           <div className="flex-1">
             <h1 className="text-2xl font-semibold tracking-tight">{client?.clients?.name ?? 'Danas'}</h1>
+            {(owners.google || owners.meta) && (
+              <p className="mt-0.5 text-xs text-[var(--color-ink-soft)]">
+                Vlasnik: {[owners.google && `Google — ${personName(owners.google)}`, owners.meta && `Meta — ${personName(owners.meta)}`].filter(Boolean).join(' · ')}
+              </p>
+            )}
             <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
               {lastRun ? <>Provera: {new Date(lastRun.finished_at ?? lastRun.run_date).toLocaleString('sr-Latn-RS', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' })}{lastRun.data_date ? ` · podaci do ${lastRun.data_date.slice(8, 10)}.${lastRun.data_date.slice(5, 7)}.` : ''}{lastRun.status === 'failed' ? ' · nije uspela' : ''}</> : 'Još nema provere'}
               {' · '}{open.length ? `${open.length} za odluku` : 'sve rešeno'}

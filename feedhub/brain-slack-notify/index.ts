@@ -2,7 +2,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2.56.0'
 
 // PPC alarms from Brain to Slack, through Feed Hub's Slack bot (the bot token stays here).
 // Auth: x-api-key checked against external_api_keys (scope slack:notify). Only the channels in ALLOWED.
-// Actions: whoami | ensure_channel { name } | post { channel, text, mention_channel?, thread_ts?, add_reactions? }
+// Actions: whoami | ensure_channel { name } | post { channel, text, mention_emails?, mention_channel?, thread_ts?, add_reactions? }
 //          | reactions { channel, ts } (who reacted with what, by name; needs reactions:read and users:read)
 
 const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
@@ -115,7 +115,13 @@ Deno.serve(async (req) => {
     if (body.action === 'post') {
       const text = String(body.text ?? '').slice(0, 3500)
       if (!text) return json({ error: 'text je obavezan' }, 400)
-      const full = (body.mention_channel ? '<!channel> ' : '') + text
+      // The owner(s) by email (users:read.email); nobody found falls back to @channel when that was asked for.
+      const ids: string[] = []
+      for (const email of (Array.isArray(body.mention_emails) ? body.mention_emails : []).slice(0, 3)) {
+        const u = await slackForm('users.lookupByEmail', { email: String(email) })
+        if (u.ok && u.user?.id) ids.push(u.user.id)
+      }
+      const full = (ids.length ? ids.map((id) => `<@${id}>`).join(' ') + ' ' : body.mention_channel ? '<!channel> ' : '') + text
       const r = await slack('chat.postMessage', { channel: ch.id, text: full, unfurl_links: false, unfurl_media: false, ...(body.thread_ts ? { thread_ts: String(body.thread_ts) } : {}) })
       if (!r.ok) return json({ error: `chat.postMessage: ${r.error}${r.needed ? ` (treba ${r.needed})` : ''}` }, 502)
       // Reactions put on the message by the bot, so the team answers with one click (needs reactions:write).
