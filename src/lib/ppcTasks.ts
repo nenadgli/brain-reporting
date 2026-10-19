@@ -4,7 +4,7 @@ import { supabase } from './supabase'
 // time for one task for one client, used to estimate time saved; adjust them here.
 export type TaskKey =
   | 'provera_budzeta' | 'optimizacija_budzeta' | 'provera_naloga' | 'search_terms' | 'disapproved'
-  | 'recommendations' | 'placements' | 'ga4' | 'mesecna_potrosnja' | 'kampanje' | 'alokacija_budzeta' | 'osvezavanje_oglasa' | 'proizvodi'
+  | 'recommendations' | 'placements' | 'ga4' | 'mesecna_potrosnja' | 'kampanje' | 'alokacija_budzeta' | 'osvezavanje_oglasa' | 'proizvodi' | 'hitni_alarmi'
 
 export type View = 'review' | 'budgets' | 'campaigns' | 'products'
 
@@ -22,6 +22,7 @@ export const TASKS: { key: TaskKey; label: string; cadence: string; minutes: num
   { key: 'proizvodi', label: 'Proizvodi i feed', cadence: 'nedeljno', minutes: 30, view: 'products' },
   { key: 'osvezavanje_oglasa', label: 'Osvežavanje oglasa', cadence: 'kvartalno', minutes: 45, view: 'campaigns' },
   { key: 'kampanje', label: 'Kampanje', cadence: 'po briefu', minutes: 60, view: 'campaigns' },
+  { key: 'hitni_alarmi', label: 'Hitni alarmi (Slack)', cadence: 'po alarmu', minutes: 0, view: 'review' },
 ]
 export const TASK_BY_KEY = Object.fromEntries(TASKS.map((t) => [t.key, t])) as Record<TaskKey, (typeof TASKS)[number]>
 

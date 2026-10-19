@@ -11,6 +11,7 @@ type Client = { id: string; name: string }
 const ACTION_LABEL: Record<string, string> = {
   odobreno: 'odobreno', odbijeno: 'odbijeno', odlozeno: 'odloženo', izvrseno: 'urađeno',
   budzet_unet: 'budžet unet', zavrseno: 'task završen', novo: 'čeka odluku', vraceno: 'vraćeno na odluku', nacrt: 'nacrt', izvezeno: 'izvezeno', objavljeno: 'objavljeno',
+  alarm_poslat: 'alarm poslat', alarm_preuzet: 'preuzeo alarm', alarm_resen: 'rešio alarm', lazna_uzbuna: 'lažna uzbuna',
   editor_csv: 'Editor CSV', meta_csv: 'Meta CSV', izvestaj_csv: 'izveštaj preuzet', negativne_csv: 'negativne CSV', iskljucenja_csv: 'isključenja CSV',
 }
 
@@ -133,7 +134,7 @@ export default function WorkLog() {
                   <span className="w-28 text-xs font-medium">{e.user_email ? who(e.user_email) : 'Brain'}</span>
                   <span className="rounded bg-[var(--color-indigo-soft)] px-2 text-xs text-[var(--color-indigo-dark)]">{ACTION_LABEL[e.action] ?? e.action}</span>
                   <span className="w-40 text-xs">{e.client_name ?? 'svi klijenti'}</span>
-                  <span className="flex-1 truncate">{e.detail}</span>
+                  <span className="flex-1 truncate">{e.detail?.replace(/\*/g, '')}</span>
                   <span className="text-xs text-[var(--color-ink-soft)]">{TASK_BY_KEY[e.task]?.label ?? e.task}</span>
                 </li>
               ))}
