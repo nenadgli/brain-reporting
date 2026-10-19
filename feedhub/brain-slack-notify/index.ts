@@ -26,6 +26,17 @@ async function slack(method: string, body: Record<string, unknown>): Promise<any
   return r.json()
 }
 
+// Read methods (reactions.get, users.info) do not take a JSON body: their arguments go as form fields.
+// deno-lint-ignore no-explicit-any
+async function slackForm(method: string, args: Record<string, string>): Promise<any> {
+  const r = await fetch(`https://slack.com/api/${method}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams(args).toString(),
+  })
+  return r.json()
+}
+
 // The channel's id: first among the channels the bot is a member of (public or private, it was invited), then among
 // the workspace's public channels (joined if needed), and created as a public channel only if it does not exist.
 async function ensureChannel(name: string) {
@@ -86,7 +97,7 @@ Deno.serve(async (req) => {
 
     if (body.action === 'ensure_channel') return json(ch)
     if (body.action === 'reactions') {
-      const r = await slack('reactions.get', { channel: ch.id, timestamp: String(body.ts ?? ''), full: true })
+      const r = await slackForm('reactions.get', { channel: ch.id, timestamp: String(body.ts ?? ''), full: 'true' })
       if (!r.ok) return json({ error: `reactions.get: ${r.error}${r.needed ? ` (treba ${r.needed})` : ''}` }, 502)
       // deno-lint-ignore no-explicit-any
       const all = (r.message?.reactions ?? []) as any[]
@@ -96,7 +107,7 @@ Deno.serve(async (req) => {
       const ids = [...new Set(list.flatMap((x) => x.users ?? []))] as string[]
       const names: Record<string, string> = {}
       for (const id of ids) {
-        const u = await slack('users.info', { user: id })
+        const u = await slackForm('users.info', { user: id })
         names[id] = u.ok ? (u.user?.profile?.display_name || u.user?.real_name || id) : id
       }
       return json({ ok: true, reactions: list.map((x) => ({ name: x.name, users: (x.users ?? []).map((id: string) => names[id] ?? id) })) })
