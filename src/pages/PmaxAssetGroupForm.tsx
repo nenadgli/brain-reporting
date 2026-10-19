@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { landingFor } from '../lib/briefFill'
 import { type Brief, type ImageAsset, FIELD_LABEL, downloadEditorPackage } from '../lib/creatives'
 
 type ClientRow = { id: string; name: string; ga4_store: string | null }
@@ -131,7 +132,9 @@ export default function PmaxAssetGroupForm({ client, market, brief, images, onSa
     if (!brief) return
     setGroupName(groupNameFromBrief(brief))
     setFinalUrl(brief.landing_page ?? '')
-  }, [brief])
+    // No landing page in the brief: a page from the account that matches the action's name, or the home page.
+    if (!brief.landing_page) landingFor(client.id, brief).then((l) => { if (l) { setFinalUrl(l.url); onMessage?.({ kind: 'ok', text: `Final URL: ${l.why}.` }) } })
+  }, [brief]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadDrafts() {
     const { data, error } = await supabase

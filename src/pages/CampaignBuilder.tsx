@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { dailyBudgetFor, landingFor } from '../lib/briefFill'
 import { type AssetMode, type Attachment, type Brief, type BriefComment, type ImageAsset, FIELD_LABEL, assetFileName, checkImage, docLinks, downloadEditorPackage, fromBrief, imageSize, isApproval } from '../lib/creatives'
 import PmaxAssetGroupForm from './PmaxAssetGroupForm'
 import DemandGenAdGroupForm from './DemandGenAdGroupForm'
@@ -338,6 +339,17 @@ export default function CampaignBuilder() {
     }
     setName(data.theme ?? brief.headline ?? '')
     setAdGroup(data.ad_group ?? ''); setFinalUrl(data.final_url ?? '')
+    // What the brief leaves out: landing page from the account, daily budget from the media plan.
+    const filled: string[] = []
+    if (!data.final_url && clientId) {
+      const l = await landingFor(clientId, brief)
+      if (l) { setFinalUrl(l.url); filled.push(`Final URL: ${l.why}.`) }
+    }
+    if (!budget && clientId) {
+      const d = await dailyBudgetFor(clientId, brief, 'SEARCH')
+      if (d) { setBudget(String(d.value)); filled.push(`Dnevni budžet ${d.value} €: ${d.why}.`) } else filled.push('Dnevni budžet: u media planu nema Search reda za ovu akciju, upiši ga ručno.')
+    }
+    if (filled.length) setMessage({ kind: 'ok', text: filled.join(' ') })
     setPath1(data.path1 ?? ''); setPath2(data.path2 ?? '')
     setHeadlines((data.headlines ?? []).join('\n')); setDescriptions((data.descriptions ?? []).join('\n'))
     setKeywords((data.keywords ?? []).join('\n'))
@@ -373,6 +385,33 @@ export default function CampaignBuilder() {
     } catch (e) {
       setImageNotes((n) => ({ ...n, [a.id]: (e as Error).message }))
     }
+  }
+
+  // All images of a group (or of the task) at once: each is checked like a single pick; the ones that do not fit
+  // are left out with the reason under them, and the limit is kept.
+  const [addingAll, setAddingAll] = useState(false)
+  async function addAll(list: Attachment[]) {
+    const limit = MAX_IMAGES + (mode !== 'search' ? 5 : 0)
+    const have = new Set(images.map((i) => i.attachment_id))
+    const added: ImageAsset[] = []
+    const notes: Record<string, string> = {}
+    setAddingAll(true)
+    for (const a of list) {
+      if (!(a.content_type ?? '').startsWith('image/') || have.has(a.id)) continue
+      if (images.length + added.length >= limit) { notes[a.id] = 'preko limita, nije dodata'; continue }
+      try {
+        const { w, h } = await imageSize(a.url)
+        const res = checkImage(a, w, h, mode)
+        if ('problem' in res) { notes[a.id] = res.problem; continue }
+        notes[a.id] = `${w}×${h} · ${mode !== 'search' ? FIELD_LABEL[res.field] : res.ratio}`
+        added.push({ attachment_id: a.id, name: a.name ?? '', file: assetFileName(a), width: w, height: h, ratio: res.ratio, field: res.field })
+      } catch (e) {
+        notes[a.id] = (e as Error).message
+      }
+    }
+    setImageNotes((n) => ({ ...n, ...notes }))
+    setImages((l) => [...l, ...added.filter((x) => !l.some((i) => i.attachment_id === x.attachment_id))])
+    setAddingAll(false)
   }
 
   function switchMode(m: AssetMode) {
@@ -619,9 +658,18 @@ export default function CampaignBuilder() {
             {attLoading && <p className="text-xs text-[var(--color-ink-soft)]">Učitavam priloge iz Productive-a…</p>}
             {attError && <p className="text-xs text-[var(--color-rust)]">Prilozi nisu učitani: {attError}</p>}
             {!attLoading && !attError && attachments.length === 0 && <p className="text-xs text-[var(--color-ink-soft)]">Task nema priloga.</p>}
+            {attachments.some((a) => (a.content_type ?? '').startsWith('image/')) && (
+              <button onClick={() => addAll(attachments)} disabled={addingAll} className="btn-secondary mb-3 text-sm">
+                {addingAll ? 'Proveravam slike…' : `Dodaj sve slike (${attachments.filter((a) => (a.content_type ?? '').startsWith('image/')).length})`}
+              </button>
+            )}
             {groupAttachments(attachments).map(([group, list]) => (
               <div key={group} className="mb-4">
-                <p className="mb-2 text-xs font-medium text-[var(--color-ink-soft)]">{group} · {list.length}</p>
+                <p className="mb-2 flex items-center gap-3 text-xs font-medium text-[var(--color-ink-soft)]">{group} · {list.length}
+                  {list.some((a) => (a.content_type ?? '').startsWith('image/')) && (
+                    <button onClick={() => addAll(list)} disabled={addingAll} className="font-normal text-[var(--color-indigo)]">dodaj sve iz ove grupe</button>
+                  )}
+                </p>
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
                   {list.map((a) => {
                     const ct = a.content_type ?? ''

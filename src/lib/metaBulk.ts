@@ -94,8 +94,12 @@ const HEADERS = [
   'Optimization Goal', 'Billing Event',
   'Ad Status', 'Ad Name', 'Body', ...Array.from({ length: MAX_TEXTS - 1 }, (_, i) => `Additional Body ${i + 1}`),
   'Title', ...Array.from({ length: MAX_TEXTS - 1 }, (_, i) => `Additional Title ${i + 1}`),
-  'Link Description', 'Link', 'Call to Action', 'Image File Name', 'Instagram Account ID',
+  'Link Description', 'Link', 'URL Tags', 'Call to Action', 'Image File Name', 'Instagram Account ID',
 ]
+
+// UTMs as the team's ads already carry them, so GA4 sees facebook / paid and "campaign--ad set" (the Brain ROAS check
+// joins Meta campaigns to GA4 by that name). Meta fills the {{…}} names in when the ad runs.
+export const META_URL_TAGS = 'utm_source=facebook&utm_medium=paid&utm_campaign={{campaign.name}}--{{adset.name}}&utm_content={{ad.name}}'
 
 const esc = (v: unknown) => { const s = v == null ? '' : String(v); return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s }
 const time = (d: string | null, end = false) => (d ? `${d} ${end ? '23:59:00' : '00:00:00'}` : '')
@@ -152,7 +156,7 @@ export function bulkCsv(campaigns: MetaCampaign[]): string {
           'Device Platforms': ((t.device_platforms as string[] | undefined) ?? []).join(', '),
           'Optimization Goal': s.optimization_goal, 'Billing Event': s.billing_event || 'IMPRESSIONS',
           'Ad Status': 'PAUSED', 'Ad Name': a.name, Body: texts[0] ?? '', Title: titles[0] ?? '',
-          'Link Description': a.description, Link: a.link, 'Call to Action': a.cta === 'NO_BUTTON' ? '' : a.cta,
+          'Link Description': a.description, Link: a.link, 'URL Tags': a.link ? META_URL_TAGS : '', 'Call to Action': a.cta === 'NO_BUTTON' ? '' : a.cta,
           'Image File Name': a.image?.file ?? '', 'Instagram Account ID': c.instagram_id,
         }
         texts.slice(1).forEach((x, i) => { r[`Additional Body ${i + 1}`] = x })
