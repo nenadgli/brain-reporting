@@ -4,6 +4,8 @@ import { createClient } from 'npm:@supabase/supabase-js@2.56.0'
 // Auth: x-api-key checked against external_api_keys (scope slack:notify). Only the channels in ALLOWED.
 // Actions: whoami | ensure_channel { name } | post { channel, text, mention_emails?, mention_channel?, thread_ts?, add_reactions? }
 //          | reactions { channel, ts } (who reacted with what, by name; needs reactions:read and users:read)
+//          | sent_alarms { days?, kinds? } (the alarms Feed Hub's ppc-slack-alerts posted to #ppc-alarm, so Brain can read
+//            their reactions into Istorija like its own)
 
 const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
 const TOKEN = Deno.env.get('SLACK_BOT_TOKEN') ?? ''
@@ -89,6 +91,28 @@ Deno.serve(async (req) => {
       const a = await slack('auth.test', {})
       const u = a.ok && a.user_id ? await slack('users.info', { user: a.user_id }) : null
       return json({ ok: a.ok, error: a.error, team: a.team, bot_user: a.user, user_id: a.user_id, display_name: u?.user?.profile?.display_name || u?.user?.real_name || null })
+    }
+    if (body.action === 'sent_alarms') {
+      const since = new Date(Date.now() - Math.min(7, Number(body.days) || 2) * 864e5).toISOString()
+      const kinds = Array.isArray(body.kinds) ? body.kinds.map(String) : ['mplan', 'oos', 'feed', 'stockcheck', 'trendq', 'pacing', 'automap']
+      const { data: sent, error } = await sb.from('bf_slack_sent').select('key, kind, channel, sent_at, slack_ts').gte('sent_at', since).in('kind', kinds).not('slack_ts', 'is', null).limit(500)
+      if (error) return json({ error: error.message }, 500)
+      const keys = (sent ?? []).map((r) => r.key)
+      const [{ data: alerts }, { data: pacing }] = await Promise.all([
+        keys.length ? sb.from('bf_alerts').select('key, market, title, detail').in('key', keys) : Promise.resolve({ data: [] }),
+        keys.length ? sb.from('ai_job_events').select('dedupe_key, title, body').in('dedupe_key', keys) : Promise.resolve({ data: [] }),
+      ])
+      const byKey = new Map((alerts ?? []).map((a) => [a.key, a]))
+      const pByKey = new Map((pacing ?? []).map((p) => [p.dedupe_key, p]))
+      return json({
+        ok: true,
+        alarms: (sent ?? []).map((r) => {
+          const a = byKey.get(r.key), p = pByKey.get(r.key)
+          // Pacing keys carry the market as their second part ("pacing:RS:…").
+          return { key: r.key, kind: r.kind, channel: r.channel, sent_at: r.sent_at, slack_ts: r.slack_ts,
+            market: a?.market ?? (r.kind === 'pacing' ? r.key.split(':')[1] ?? null : null), title: a?.title ?? p?.title ?? r.key, detail: a?.detail ?? p?.body ?? null }
+        }),
+      })
     }
     const name = String(body.channel ?? body.name ?? '').replace(/^#/, '')
     if (!ALLOWED.has(name)) return json({ error: `kanal ${name} nije dozvoljen` }, 400)

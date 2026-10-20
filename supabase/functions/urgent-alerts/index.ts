@@ -208,6 +208,29 @@ function ownerEmails(params: unknown, a: { payload: Record<string, unknown> }) {
 // the last two days that are not closed; an alarm nobody took within reminder_hours gets one reminder in its thread.
 const HOW_TO_REACT = '_Klikni ispod: :eyes: preuzimam · :white_check_mark: rešeno · :x: lažna uzbuna_'
 const TAKE = ['eyes'], DONE = ['white_check_mark', 'heavy_check_mark', 'ballot_box_with_check'], FALSE = ['x', 'no_entry_sign']
+// Feed Hub's own alarms in #ppc-alarm (media plan, feed, out of stock, search spikes, pacing) are copied into
+// urgent_alerts, so their reactions are read below and show in Istorija like Brain's. The market picks the
+// Fashion&Friends client of that market; an alarm for all markets has no client and is left out. They get no
+// reminder (reminded_at is set on import): Feed Hub sends many of them and the team asked for none.
+async function importFeedHub(slackKey: string) {
+  const r = await fetch(SLACK_FN, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': slackKey }, body: JSON.stringify({ action: 'sent_alarms', days: 2 }) })
+  const j = await r.json().catch(() => ({}))
+  if (!j.ok) return { error: String(j.error ?? r.status) }
+  const { data: clients } = await sb.from('clients').select('id, name').like('name', 'Fashion&Friends %')
+  const byMarket = new Map((clients ?? []).map((c) => [c.name.split(' ').pop(), c.id]))
+  const day = (iso: string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Belgrade' }).format(new Date(iso))
+  // deno-lint-ignore no-explicit-any
+  const rows = ((j.alarms ?? []) as any[]).filter((a) => byMarket.has(a.market)).map((a) => ({
+    client_id: byMarket.get(a.market), alert_date: day(a.sent_at), kind: `feedhub_${a.kind}`, key: a.key,
+    text: `*${a.title}*${a.detail ? ` · ${String(a.detail).slice(0, 300)}` : ''}`,
+    payload: { source: 'feedhub', sender: 'Feed Hub', network: a.kind === 'oos' || /meta/i.test(a.key) ? 'meta' : 'google', market: a.market },
+    sent_at: a.sent_at, slack_channel: a.channel, slack_ts: a.slack_ts, reminded_at: a.sent_at,
+  }))
+  if (!rows.length) return { imported: 0 }
+  const { error } = await sb.from('urgent_alerts').upsert(rows, { onConflict: 'client_id,alert_date,kind,key', ignoreDuplicates: true })
+  return error ? { error: error.message } : { imported: rows.length }
+}
+
 async function followUp(slackKey: string) {
   const since = new Date(Date.now() - 2 * 864e5).toISOString().slice(0, 10)
   const { data: open } = await sb.from('urgent_alerts').select('client_id, alert_date, kind, key, payload, slack_channel, slack_ts, sent_at, taken_by, reminded_at')
@@ -284,8 +307,9 @@ Deno.serve(async (req) => {
         results.push({ client: name, error: (e as Error).message })
       }
     }
+    const feedhub = body.dry_run ? null : await importFeedHub(slackKey ?? '').catch((e) => ({ error: (e as Error).message }))
     const followup = body.dry_run ? null : await followUp(slackKey ?? '').catch((e) => ({ error: (e as Error).message }))
-    return json({ ok: true, date: now.date, hour, results, followup })
+    return json({ ok: true, date: now.date, hour, results, feedhub, followup })
   } catch (e) {
     return json({ error: (e as Error).message }, 500)
   }
