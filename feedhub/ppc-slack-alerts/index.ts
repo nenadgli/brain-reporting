@@ -282,6 +282,20 @@ async function slackApi(token: string, method: string, body: unknown, form = fal
 }
 
 /** Posts a message; long texts are split into several section blocks (Slack limit is 3000 chars per block), a "---" line is a divider. */
+// Alarms the team acts on get the same one-click answers as Brain's alarms (the bot puts the reactions on, so they can
+// be clicked): :eyes: taken, :white_check_mark: solved, :x: false alarm. Informational posts (spiker, milestones, the
+// digest) get none. Needs reactions:write.
+const REACT_KINDS = new Set(["mplan", "oos", "feed", "stockcheck", "trendq", "pacing", "automap"]);
+const HOW_TO_REACT = "_Klikni ispod: :eyes: preuzimam · :white_check_mark: rešeno · :x: lažna uzbuna_";
+async function addReactions(token: string, channel: string, ts: string): Promise<string[]> {
+  const errors: string[] = [];
+  for (const name of ["eyes", "white_check_mark", "x"]) {
+    // A missing reaction must not lose the alarm (it is already posted).
+    await slackApi(token, "reactions.add", { channel, timestamp: ts, name }).catch((e) => errors.push((e as Error).message));
+  }
+  return errors.slice(0, 1);
+}
+
 async function postSlack(token: string, text: string) {
   const blocks: unknown[] = [];
   let chunk = "";
@@ -459,7 +473,9 @@ Deno.serve(async (req: Request) => {
       let error: string | null = null;
       for (const m of out.slice(0, 15)) {
         try {
-          const { ts, channel } = await postSlack(slackToken, m.text);
+          const react = REACT_KINDS.has(m.kind);
+          const { ts, channel } = await postSlack(slackToken, react ? `${m.text}\n${HOW_TO_REACT}` : m.text);
+          if (react) warnings.push(...await addReactions(slackToken, channel, ts));
           for (const k of m.keys ?? [m.key]) done.push({ key: k, slack_ts: ts, kind: m.kind });
           if (m.attachExamples) {
             const w = await attachExamples(channel, today, stockSince);
