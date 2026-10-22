@@ -25,14 +25,14 @@ Deno.serve(async (req: Request) => {
     const results = []
     for (const source of sources) {
       const rawAccountId = source.windsor_connection_id.includes('__') ? source.windsor_connection_id.split('__')[1] : source.windsor_connection_id
-      // Backfill (body.link_clicks_only): only link clicks are written into the rows already stored, matched by date and
-      // name (and ad set). A full re-pull would rename old rows to today's campaign names and break the GA4 matching
-      // and the report rows built on the old names.
+      // Backfill (body.link_clicks_only): only link clicks are written into the rows already stored, matched by date, name and ad set
+      // or, for a campaign renamed since, by the same day's spend and impressions. A full re-pull would rename old rows to
+      // today's campaign names and break the GA4 matching and the report rows built on the old names.
       if (body.link_clicks_only) {
-        const p = new URLSearchParams({ ...dateParams(body), api_key: WINDSOR_API_KEY, select_accounts: rawAccountId, fields: 'date,campaign,adset_name,inline_link_clicks' })
+        const p = new URLSearchParams({ ...dateParams(body), api_key: WINDSOR_API_KEY, select_accounts: rawAccountId, fields: 'date,campaign,adset_name,impressions,spend,inline_link_clicks' })
         const r0 = await fetch(`https://connectors.windsor.ai/facebook?${p.toString()}`)
         if (!r0.ok) { results.push({ source: source.windsor_connection_id, error: `HTTP ${r0.status}` }); continue }
-        const rows = ((await r0.json()).data ?? []).map((r: Record<string, unknown>) => ({ date: r.date, campaign: r.campaign, adset_name: r.adset_name ?? null, link_clicks: Number(r.inline_link_clicks) || 0 }))
+        const rows = ((await r0.json()).data ?? []).map((r: Record<string, unknown>) => ({ date: r.date, campaign: r.campaign, adset_name: r.adset_name ?? null, spend: r.spend ?? 0, impressions: r.impressions ?? 0, link_clicks: Number(r.inline_link_clicks) || 0 }))
         let updated = 0
         for (let i = 0; i < rows.length; i += 1000) {
           const { data, error } = await supabase.rpc('meta_link_clicks_fill', { p_source: source.id, p_level: 'adset', p_rows: rows.slice(i, i + 1000) })
