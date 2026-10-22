@@ -71,12 +71,22 @@ Deno.serve(async (req: Request) => {
 
       await supabase.from('data_sources').update({ status: 'active', last_synced_at: new Date().toISOString() }).eq('id', source.id)
 
+      // Purchases come per campaign and day, the main rows per device: they go on ONE device row of the campaign and day
+      // (the one with the most clicks), the other device rows get 0. Written on every device row they were counted
+      // two to four times over in every sum (F&F RS, September 2026: 25,871 instead of 7,225).
+      const carrier = new Map<string, Record<string, unknown>>()
+      for (const r of mainRows) {
+        const key = `${r.date}|${r.campaign}`
+        const c = carrier.get(key)
+        if (!c || Number(r.clicks ?? 0) > Number(c.clicks ?? 0) || (Number(r.clicks ?? 0) === Number(c.clicks ?? 0) && String(r.device) < String(c.device))) carrier.set(key, r)
+      }
+
       const metricRows = mainRows.map((r: Record<string, unknown>) => {
         const isRow = isMap.get(`${r.date}|${r.campaign}`)
         return {
           client_id, data_source_id: source.id, report_date: r.date, campaign: r.campaign,
           campaign_type: r.campaign_type, device: r.device, impressions: r.impressions ?? 0, clicks: r.clicks ?? 0,
-          spend: r.spend ?? 0, conversions: convMap.get(`${r.date}|${r.campaign}`) ?? 0, conversion_value: r.conversion_value ?? 0,
+          spend: r.spend ?? 0, conversions: carrier.get(`${r.date}|${r.campaign}`) === r ? convMap.get(`${r.date}|${r.campaign}`) ?? 0 : 0, conversion_value: r.conversion_value ?? 0,
           unique_users: r.unique_users ?? 0,
           search_impression_share: isRow?.search_impression_share ?? null,
           search_lost_is_budget: isRow?.search_budget_lost_impression_share ?? null,

@@ -187,6 +187,11 @@ export default function PpcMediaReport() {
             Struktura ovog izveštaja prati PPC media plan format (Ecomm / Loyalty / Social budžetski rasponi, po mreži i po kampanji). Planirani
             budžet (Regular/Flash raspodela) je ručni unos PPC tima i ovde se ne prikazuje — ovo su isključivo stvarni (actual) rezultati iz
             platformi.
+            <span className="mt-2 block">
+              Kako se broji: Google konverzije su kupovine (samo purchase akcije), jednom po kampanji i danu; Meta klikovi su klikovi na
+              link, kao u Ads Manageru; Meta kupovine po Meta atribuciji, pa ad set bez troška u periodu može imati kupovine. Google
+              doseg se ne prikazuje, jer zbir dnevnih jedinstvenih korisnika nije doseg.
+            </span>
           </section>
 
           <section className="mb-10 grid grid-cols-5 gap-3">
