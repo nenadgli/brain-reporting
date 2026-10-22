@@ -25,6 +25,32 @@ Deno.serve(async (req: Request) => {
     const results = []
     for (const source of sources) {
       const rawAccountId = source.windsor_connection_id.includes('__') ? source.windsor_connection_id.split('__')[1] : source.windsor_connection_id
+      // Reach for a whole period (body.period_reach with date_from/date_to, normally a month): reach is people, so it cannot
+      // be added up from daily rows. Asked without the date field, per campaign and per ad set, and kept in meta_period_reach.
+      if (body.period_reach && body.date_from && body.date_to) {
+        // Keyed, so two campaigns with the same name in one account make one row (the larger reach), not a key conflict.
+        const out = new Map<string, Record<string, unknown>>()
+        for (const [level, fields] of [['campaign', 'campaign,reach,impressions'], ['adset', 'campaign,adset_name,reach,impressions']] as const) {
+          const p = new URLSearchParams({ date_from: body.date_from, date_to: body.date_to, api_key: WINDSOR_API_KEY, select_accounts: rawAccountId, fields })
+          const r0 = await fetch(`https://connectors.windsor.ai/facebook?${p.toString()}`)
+          if (!r0.ok) throw new Error(`Windsor ${level} reach HTTP ${r0.status}`)
+          for (const r of ((await r0.json()).data ?? []) as Record<string, unknown>[]) {
+            if (!r.campaign) continue
+            const key = `${level}|${r.campaign}|${level === 'adset' ? r.adset_name ?? '' : ''}`
+            if (Number(out.get(key)?.reach ?? -1) >= Number(r.reach ?? 0)) continue
+            out.set(key, { client_id, data_source_id: source.id, level, campaign: r.campaign, adset_name: level === 'adset' ? String(r.adset_name ?? '') : '',
+              date_from: body.date_from, date_to: body.date_to, reach: r.reach ?? null, impressions: r.impressions ?? null, synced_at: new Date().toISOString() })
+          }
+        }
+        await supabase.from('meta_period_reach').delete().eq('data_source_id', source.id).eq('date_from', body.date_from).eq('date_to', body.date_to)
+        const list = [...out.values()]
+        for (let i = 0; i < list.length; i += 500) {
+          const { error } = await supabase.from('meta_period_reach').insert(list.slice(i, i + 500))
+          if (error) throw error
+        }
+        results.push({ source: source.windsor_connection_id, period_reach_rows: list.length })
+        continue
+      }
       // Backfill (body.link_clicks_only): only link clicks are written into the rows already stored, matched by date, name
       // or, for a campaign renamed since, by the same day's spend and impressions. A full re-pull would rename old rows to
       // today's campaign names and break the GA4 matching and the report rows built on the old names.

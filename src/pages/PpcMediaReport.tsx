@@ -189,8 +189,10 @@ export default function PpcMediaReport() {
             platformi.
             <span className="mt-2 block">
               Kako se broji: Google konverzije su kupovine (samo purchase akcije), jednom po kampanji i danu; Meta klikovi su klikovi na
-              link, kao u Ads Manageru; Meta kupovine po Meta atribuciji, pa ad set bez troška u periodu može imati kupovine. Google
-              doseg se ne prikazuje, jer zbir dnevnih jedinstvenih korisnika nije doseg.
+              link, kao u Ads Manageru; Meta kupovine po Meta atribuciji, pa ad set bez troška u periodu može imati kupovine. Meta
+              doseg je doseg kampanje ili ad seta za ceo mesec, kako ga Meta računa; u zbiru više kampanja ista osoba se broji
+              u svakoj. Google doseg se ne prikazuje, jer zbir dnevnih jedinstvenih korisnika nije doseg. Kampanje koje ne
+              pripadaju nijednom redu stoje u redu „Ostalo (van strukture)“, pa redovi uvek daju ukupan zbir.
             </span>
           </section>
 
