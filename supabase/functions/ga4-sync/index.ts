@@ -34,11 +34,12 @@ Deno.serve(async (req: Request) => {
     for (const source of sources) {
       const rawAccountId = source.windsor_connection_id.includes('__') ? source.windsor_connection_id.split('__')[1] : source.windsor_connection_id
       const baseFields = 'date,source,medium,campaign,' + (noStore ? '' : 'customevent_store,') + 'sessions,totalusers,newusers,engaged_sessions,engagement_rate,bounce_rate,conversions,totalrevenue'
-      const params = new URLSearchParams({
-        ...dateParams(body), api_key: WINDSOR_API_KEY, select_accounts: rawAccountId,
-        fields: baseFields,
-      })
-      const res = await fetch(`https://connectors.windsor.ai/googleanalytics4?${params.toString()}`)
+      const fetchGa4 = (fields: string) => fetch(`https://connectors.windsor.ai/googleanalytics4?${new URLSearchParams({
+        ...dateParams(body), api_key: WINDSOR_API_KEY, select_accounts: rawAccountId, fields,
+      }).toString()}`)
+      // transactions = GA4 purchases (the PPC team's conversion definition); fall back if the property rejects it
+      let res = await fetchGa4(baseFields + ',transactions')
+      if (!res.ok) res = await fetchGa4(baseFields)
       if (!res.ok) { results.push({ source: source.windsor_connection_id, error: `HTTP ${res.status}` }); continue }
       const json = await res.json()
       const allRows = json.data ?? []
@@ -51,6 +52,7 @@ Deno.serve(async (req: Request) => {
         store: noStore ? null : clean(r.customevent_store), sessions: r.sessions ?? 0, total_users: r.totalusers ?? 0, new_users: r.newusers ?? 0,
         engaged_sessions: r.engaged_sessions ?? 0, engagement_rate: r.engagement_rate, bounce_rate: r.bounce_rate,
         conversions: r.conversions ?? 0, total_revenue: r.totalrevenue ?? 0,
+        transactions: r.transactions ?? null,
       }))
       let insertedCount = 0
       let lastError: string | null = null

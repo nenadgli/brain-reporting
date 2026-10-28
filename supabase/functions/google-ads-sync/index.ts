@@ -27,6 +27,25 @@ Deno.serve(async (req: Request) => {
     for (const source of sources) {
       const rawAccountId = source.windsor_connection_id.includes('__') ? source.windsor_connection_id.split('__')[1] : source.windsor_connection_id
 
+      // Unique users for a whole period (body.period_reach with date_from/date_to): people cannot be added up from daily
+      // rows, so they are asked without the date field, per campaign, and kept in google_period_reach.
+      if (body.period_reach && body.date_from && body.date_to) {
+        const p = new URLSearchParams({ date_from: body.date_from, date_to: body.date_to, api_key: WINDSOR_API_KEY, select_accounts: rawAccountId, fields: 'campaign,unique_users,impressions' })
+        const r0 = await fetch(`https://connectors.windsor.ai/google_ads?${p.toString()}`)
+        if (!r0.ok) throw new Error(`Windsor unique users HTTP ${r0.status}`)
+        const out = new Map<string, Record<string, unknown>>()
+        for (const r of ((await r0.json()).data ?? []) as Record<string, unknown>[]) {
+          if (!r.campaign || Number(out.get(String(r.campaign))?.unique_users ?? -1) >= Number(r.unique_users ?? 0)) continue
+          out.set(String(r.campaign), { client_id, data_source_id: source.id, campaign: r.campaign, date_from: body.date_from, date_to: body.date_to,
+            unique_users: r.unique_users ?? null, impressions: r.impressions ?? null, synced_at: new Date().toISOString() })
+        }
+        await supabase.from('google_period_reach').delete().eq('data_source_id', source.id).eq('date_from', body.date_from).eq('date_to', body.date_to)
+        const list = [...out.values()]
+        if (list.length) { const { error } = await supabase.from('google_period_reach').insert(list); if (error) throw error }
+        results.push({ source: source.windsor_connection_id, period_reach_rows: list.length })
+        continue
+      }
+
       // Main performance pull. IMPORTANT: search_impression_share/quality_score fields
       // must NOT be combined in this call - verified that mixing them with device-level
       // metrics causes Windsor to silently truncate ~40% of search campaigns (confirmed
