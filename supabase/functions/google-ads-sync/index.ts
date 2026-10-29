@@ -80,11 +80,26 @@ Deno.serve(async (req: Request) => {
       })
       const convRes = await fetch(`https://connectors.windsor.ai/google_ads?${convParams.toString()}`)
       const convRows: Record<string, unknown>[] = convRes.ok ? (await convRes.json()).data ?? [] : []
+      // Test (body.probe_conv, a campaign regex): conversion actions and their totals for the period, nothing stored.
+      if (body.probe_conv) {
+        const re = new RegExp(String(body.probe_conv))
+        const tot = new Map<string, number>()
+        for (const r of convRows) {
+          if (!re.test(String(r.campaign ?? ''))) continue
+          const k = String(r.conversion_action_name ?? '')
+          tot.set(k, (tot.get(k) ?? 0) + (Number(r.conversions) || 0))
+        }
+        results.push({ source: source.windsor_connection_id, actions: Object.fromEntries([...tot].sort((a, b) => b[1] - a[1])) })
+        continue
+      }
       const convMap = new Map<string, number>()
+      // App installs as the PPC team counts them in the platform: the install / first open conversion actions.
+      const installMap = new Map<string, number>()
       for (const r of convRows) {
         const actionName = String(r.conversion_action_name ?? '').toLowerCase()
-        if (!actionName.includes('purchase')) continue
         const key = `${r.date}|${r.campaign}`
+        if (/install|first.?open/.test(actionName)) installMap.set(key, (installMap.get(key) ?? 0) + (Number(r.conversions) || 0))
+        if (!actionName.includes('purchase')) continue
         convMap.set(key, (convMap.get(key) ?? 0) + (Number(r.conversions) || 0))
       }
 
@@ -106,6 +121,7 @@ Deno.serve(async (req: Request) => {
           client_id, data_source_id: source.id, report_date: r.date, campaign: r.campaign,
           campaign_type: r.campaign_type, device: r.device, impressions: r.impressions ?? 0, clicks: r.clicks ?? 0,
           spend: r.spend ?? 0, conversions: carrier.get(`${r.date}|${r.campaign}`) === r ? convMap.get(`${r.date}|${r.campaign}`) ?? 0 : 0, conversion_value: r.conversion_value ?? 0,
+          installs: carrier.get(`${r.date}|${r.campaign}`) === r ? installMap.get(`${r.date}|${r.campaign}`) ?? 0 : 0,
           unique_users: r.unique_users ?? 0,
           search_impression_share: isRow?.search_impression_share ?? null,
           search_lost_is_budget: isRow?.search_budget_lost_impression_share ?? null,
