@@ -25,6 +25,19 @@ Deno.serve(async (req: Request) => {
     const results = []
     for (const source of sources) {
       const rawAccountId = source.windsor_connection_id.includes('__') ? source.windsor_connection_id.split('__')[1] : source.windsor_connection_id
+      // Test (body.probe): one Windsor request with the given fields, dates and extra parameters (e.g. a filter), returned
+      // as is, nothing stored. Used to check whether a filtered request gives the platform's deduplicated reach for a set.
+      if (body.probe) {
+        const pr = body.probe as { fields: string; date_from: string; date_to: string; params?: Record<string, string> }
+        const p = new URLSearchParams({ date_from: pr.date_from, date_to: pr.date_to, api_key: WINDSOR_API_KEY, select_accounts: rawAccountId, fields: pr.fields, ...(pr.params ?? {}) })
+        const r0 = await fetch(`https://connectors.windsor.ai/facebook?${p.toString()}`)
+        const text = await r0.text()
+        let data: unknown = null
+        try { data = JSON.parse(text).data } catch { /* not JSON */ }
+        results.push({ source: source.windsor_connection_id, status: r0.status, rows: Array.isArray(data) ? data.length : null,
+                       data: Array.isArray(data) ? data.slice(0, 40) : text.slice(0, 500) })
+        continue
+      }
       // Reach for a whole period (body.period_reach with date_from/date_to, normally a month): reach is people, so it cannot
       // be added up from daily rows. Asked without the date field, per campaign and per ad set, and kept in meta_period_reach.
       if (body.period_reach && body.date_from && body.date_to) {
