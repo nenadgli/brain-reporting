@@ -128,23 +128,29 @@ function parseTab(values: unknown[][], tab: { y: number; m: number }, unknown: s
 function parsePlanLines(values: unknown[][], tab: { y: number; m: number }): PlanLine[] {
   const from = `${tab.y}-${pad(tab.m)}-01`, to = `${tab.y}-${pad(tab.m)}-${pad(lastDay(tab.y, tab.m))}`;
   const out: PlanLine[] = [];
-  let h: { type: number; net: number; start: number; end: number; name: number; reg: number; flash: number; split: number } | null = null;
+  let h: { type: number; net: number; start: number; end: number; name: number; reg: number; flash: number; split: number; total: number; section: string } | null = null;
   values.forEach((r, i) => {
     const cells = (r ?? []).map((c) => String(c ?? "").trim());
     const start = cells.indexOf("Start"), end = cells.indexOf("End");
     if (start >= 0 && end >= 0) {
+      // total: kolona „… Sum" / „… Total" (Meta Sum, Programmatic Total, TIkTok Total) za tabele bez kolone Regular;
+      // section: naziv tabele u zaglavlju (Meta Ads, Google Ads, Programmatic, TikTok) za redove bez mreže.
       h = { type: cells.findIndex((c) => /^(type|funnel)$/i.test(c)), net: cells.indexOf("Network"), start, end, name: end + 1,
             reg: cells.findIndex((c) => /^regular$/i.test(c)), flash: cells.findIndex((c) => /^flash$/i.test(c)),
-            split: cells.findIndex((c) => /budget split/i.test(c)) };
+            split: cells.findIndex((c) => /budget split/i.test(c)),
+            total: cells.findIndex((c, j) => j > end + 1 && /(sum|total)$/i.test(c) && !/subtotal/i.test(c)), section: cells[end + 1] ?? "" };
       return;
     }
     if (!h) return;
-    const type = cells[h.type] ?? "", name = cells[h.name] ?? "", network = cells[h.net] ?? "";
-    if (!name || /subtotal|total/i.test(type)) return;
-    const s = parseDate(r[h.start], tab), e = parseDate(r[h.end], tab);
+    const type = cells[h.type] ?? "", name = cells[h.name] ?? "", own = cells[h.net] ?? "";
+    const network = /[a-z]/i.test(own) ? own : h.section;
+    if (!/[a-z]/i.test(name) || /subtotal|total/i.test(type)) return;
+    // Ad hoc rezerva u MPL-u često nema datume: važi za ceo mesec lista.
+    const adhoc = /ad ?hoc/i.test(name);
+    const s = parseDate(r[h.start], tab) ?? (adhoc ? from : null), e = parseDate(r[h.end], tab) ?? (adhoc ? to : null);
     if (!s || !e || e < from || s > to) return;
     const regular = h.reg >= 0 ? num(r[h.reg]) : 0, flash = h.flash >= 0 ? num(r[h.flash]) : 0;
-    const total = h.reg >= 0 ? regular + flash : h.split >= 0 ? num(r[h.split]) : 0;
+    const total = h.reg >= 0 ? regular + flash : h.split >= 0 ? num(r[h.split]) : h.total >= 0 ? num(r[h.total]) : flash;
     const channel = /meta|facebook/i.test(network) ? "Meta Ads" : /google/i.test(network) ? "Google Ads" : /tiktok/i.test(network) ? "TikTok"
       : /programmatic/i.test(network) ? "Programmatic" : network;
     out.push({ name, network, channel, type, start: s, end: e, regular, flash, total, row: i + 1 });
