@@ -83,7 +83,7 @@ Deno.serve(async (req: Request) => {
       }
       const params = new URLSearchParams({
         ...dateParams(body), api_key: WINDSOR_API_KEY, select_accounts: rawAccountId,
-        fields: 'date,campaign,objective,impressions,clicks,inline_link_clicks,spend,reach,frequency,actions_omni_purchase,action_values_offsite_conversion_fb_pixel_purchase,purchase_roas_omni_purchase',
+        fields: 'date,campaign,objective,impressions,clicks,inline_link_clicks,spend,reach,frequency,actions_omni_purchase,action_values_offsite_conversion_fb_pixel_purchase,purchase_roas_omni_purchase,actions_mobile_app_install',
       })
       const res = await fetch(`https://connectors.windsor.ai/facebook?${params.toString()}`)
       if (!res.ok) { results.push({ source: source.windsor_connection_id, error: `HTTP ${res.status}` }); continue }
@@ -95,6 +95,8 @@ Deno.serve(async (req: Request) => {
         impressions: r.impressions ?? 0, clicks: r.clicks ?? 0, link_clicks: r.inline_link_clicks ?? 0, spend: r.spend ?? 0, reach: r.reach ?? 0,
         frequency: r.frequency, conversions: r.actions_omni_purchase ?? 0,
         conversion_value: r.action_values_offsite_conversion_fb_pixel_purchase ?? 0,
+        // App installs as the campaign's Meta result (PPC: "iz meta ads results kampanje"; RS 9/2026: 443)
+        installs: r.actions_mobile_app_install ?? 0,
         roas: r.purchase_roas_omni_purchase,
       }))
       if (metricRows.length > 0) {
