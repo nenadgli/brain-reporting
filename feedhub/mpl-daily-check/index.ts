@@ -13,6 +13,8 @@ import { getServiceClient, getPrimaryToken, getValidAccessToken } from "../_shar
 
 const CHANNEL = "ppc-alarm";
 const TZ = "Europe/Belgrade";
+// RTB House (Programmatic) daily cost per market: "F&F - RTB Daily Cost", tabs "F&F - <MKT> - <Line>" (Day, Cost, Impressions, Clicks).
+const RTB_SHEET_ID = "1myeTIA-tccXIlBUBZGWO0nMXByFfqm_5jw4dPgdqen4";
 const FLAG: Record<string, string> = { RS: "🇷🇸", BA: "🇧🇦", HR: "🇭🇷", ME: "🇲🇪", AL: "🇦🇱", SI: "🇸🇮" };
 const MONTHS: [RegExp, number][] = [
   [/jan/i, 1], [/feb/i, 2], [/mar/i, 3], [/apr/i, 4], [/maj|may/i, 5], [/jun/i, 6],
@@ -281,6 +283,37 @@ Deno.serve(async (req) => {
       report.push(r);
     }
 
+    // RTB House dnevni trošak → brain-reporting (brain_rtb_sync). Ceo sheet svaki put (dan se prepisuje); greška ne zaustavlja proveru.
+    let rtb: Record<string, unknown> = {};
+    try {
+      if (!reporting?.key || !reporting?.apikey) throw new Error("nema ključa za brain-reporting");
+      const meta = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${RTB_SHEET_ID}?fields=sheets.properties.title`, auth);
+      if (!meta.ok) throw new Error(`RTB sheet HTTP ${meta.status}`);
+      const tabs = (((await meta.json()).sheets ?? []) as any[]).map((x) => String(x.properties?.title ?? "")).filter((t) => / - [A-Za-z]{2} - /.test(t));
+      const qs = tabs.map((t) => `ranges=${encodeURIComponent(`'${t}'!A1:D2000`)}`).join("&");
+      const vres = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${RTB_SHEET_ID}/values:batchGet?${qs}&valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING`, auth);
+      if (!vres.ok) throw new Error(`RTB values HTTP ${vres.status}`);
+      const rows: Record<string, unknown>[] = [];
+      for (const [i, vr] of (((await vres.json()).valueRanges ?? []) as any[]).entries()) {
+        for (const v of ((vr.values ?? []) as unknown[][]).slice(1)) {
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(String(v[0] ?? ""))) continue;
+          rows.push({ tab: tabs[i], day: String(v[0]), cost: v[1] ?? null, impressions: v[2] ?? null, clicks: v[3] ?? null });
+        }
+      }
+      if (dry) rtb = { tabs, rows: rows.length };
+      else {
+        const res = await fetch(String(reporting.url).replace(/brain_mpl_sync$/, "brain_rtb_sync"), {
+          method: "POST", headers: { "Content-Type": "application/json", apikey: reporting.apikey },
+          body: JSON.stringify({ p_key: reporting.key, p_rows: rows }),
+        });
+        const out = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(`brain_rtb_sync HTTP ${res.status}: ${out?.message ?? ""}`);
+        rtb = { tabs, ...out };
+      }
+    } catch (e) {
+      rtb = { error: (e as Error).message };
+    }
+
     // Posle upisa osveži BF Live keš da se izmene odmah vide.
     const changed = report.some((r: any) => (r.changes ?? []).some((c: any) => c.applied) || (r.plan ?? []).some((p: any) => p.new + p.updated > 0));
     let refreshed = false;
@@ -325,7 +358,7 @@ Deno.serve(async (req) => {
         if (d.ok) await supabase.from("bf_slack_sent").insert({ key, kind: "mpl", channel: CHANNEL, slack_ts: d.ts });
       } else slack = "already sent today";
     }
-    return json({ ok: true, dry_run: dry, refreshed, slack, report });
+    return json({ ok: true, dry_run: dry, refreshed, slack, report, rtb });
   } catch (e) {
     return json({ error: (e as Error).message }, 500);
   }
