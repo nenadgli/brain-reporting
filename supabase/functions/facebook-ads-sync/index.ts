@@ -61,7 +61,17 @@ Deno.serve(async (req: Request) => {
           const { error } = await supabase.from('meta_period_reach').insert(list.slice(i, i + 500))
           if (error) throw error
         }
-        results.push({ source: source.windsor_connection_id, period_reach_rows: list.length })
+        // The whole account (no dimension): one deduplicated figure, the "Total" row in Ads Manager.
+        const pa = new URLSearchParams({ date_from: body.date_from, date_to: body.date_to, api_key: WINDSOR_API_KEY, select_accounts: rawAccountId, fields: 'reach,impressions' })
+        const ra = await fetch(`https://connectors.windsor.ai/facebook?${pa.toString()}`)
+        if (!ra.ok) throw new Error(`Windsor account reach HTTP ${ra.status}`)
+        const acc = (((await ra.json()).data ?? []) as Record<string, unknown>[])[0]
+        if (acc) {
+          const { error } = await supabase.from('account_period_reach').upsert({ client_id, data_source_id: source.id, platform: 'meta',
+            date_from: body.date_from, date_to: body.date_to, reach: acc.reach ?? null, impressions: acc.impressions ?? null, synced_at: new Date().toISOString() })
+          if (error) throw error
+        }
+        results.push({ source: source.windsor_connection_id, period_reach_rows: list.length, account_reach: acc?.reach ?? null })
         continue
       }
       // Backfill (body.link_clicks_only): only link clicks are written into the rows already stored, matched by date, name

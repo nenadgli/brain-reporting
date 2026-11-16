@@ -55,7 +55,17 @@ Deno.serve(async (req: Request) => {
         await supabase.from('google_period_reach').delete().eq('data_source_id', source.id).eq('date_from', body.date_from).eq('date_to', body.date_to)
         const list = [...out.values()]
         if (list.length) { const { error } = await supabase.from('google_period_reach').insert(list); if (error) throw error }
-        results.push({ source: source.windsor_connection_id, period_reach_rows: list.length })
+        // The whole account (no dimension): one deduplicated unique users figure for the period.
+        const pa = new URLSearchParams({ date_from: body.date_from, date_to: body.date_to, api_key: WINDSOR_API_KEY, select_accounts: rawAccountId, fields: 'unique_users,impressions' })
+        const ra = await fetch(`https://connectors.windsor.ai/google_ads?${pa.toString()}`)
+        if (!ra.ok) throw new Error(`Windsor account unique users HTTP ${ra.status}`)
+        const acc = (((await ra.json()).data ?? []) as Record<string, unknown>[])[0]
+        if (acc) {
+          const { error } = await supabase.from('account_period_reach').upsert({ client_id, data_source_id: source.id, platform: 'google',
+            date_from: body.date_from, date_to: body.date_to, reach: acc.unique_users ?? null, impressions: acc.impressions ?? null, synced_at: new Date().toISOString() })
+          if (error) throw error
+        }
+        results.push({ source: source.windsor_connection_id, period_reach_rows: list.length, account_reach: acc?.unique_users ?? null })
         continue
       }
 
