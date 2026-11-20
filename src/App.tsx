@@ -19,9 +19,10 @@ import Budgets from './pages/Budgets'
 import WorkLog from './pages/WorkLog'
 import Today from './pages/Today'
 import ProductFeeds from './pages/ProductFeeds'
+import MetaStructure from './pages/MetaStructure'
 import './index.css'
 
-type View = 'today' | 'summary' | 'client' | 'agency' | 'google_ads' | 'facebook_ads' | 'blended' | 'ga4' | 'owned' | 'chat' | 'ppc' | 'pacing' | 'campaigns' | 'proposal' | 'budgets' | 'done' | 'products'
+type View = 'today' | 'summary' | 'client' | 'agency' | 'google_ads' | 'facebook_ads' | 'blended' | 'ga4' | 'owned' | 'chat' | 'ppc' | 'pacing' | 'campaigns' | 'proposal' | 'budgets' | 'done' | 'products' | 'meta_structure'
 
 function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined)
@@ -41,6 +42,7 @@ function App() {
     { key: 'today', label: 'Danas', hint: 'provere i odobravanje' },
     { key: 'budgets', label: 'Budžeti', hint: 'plan, alokacija, potrošnja' },
     { key: 'campaigns', label: 'Kampanje', hint: 'nove kampanje i oglasi' },
+    { key: 'meta_structure', label: 'Meta struktura', hint: 'šabloni, ad setovi i UTM po tržištu' },
     { key: 'products', label: 'Proizvodi', hint: 'feed i prodaja po proizvodu' },
     { key: 'done', label: 'Istorija', hint: 'šta je urađeno' },
   ]
@@ -107,6 +109,7 @@ function App() {
         {view === 'products' && <ProductFeeds />}
         {view === 'proposal' && <PlanProposal />}
         {view === 'campaigns' && <CampaignBuilder />}
+        {view === 'meta_structure' && <MetaStructure />}
         {view === 'today' && <Today />}
       </div>
       </main>
