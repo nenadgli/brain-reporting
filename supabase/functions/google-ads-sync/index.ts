@@ -26,6 +26,18 @@ Deno.serve(async (req: Request) => {
     const results = []
     for (const source of sources) {
       const rawAccountId = source.windsor_connection_id.includes('__') ? source.windsor_connection_id.split('__')[1] : source.windsor_connection_id
+      // Test (body.probe_actions: list of Windsor connectors, e.g. ["google_ads","facebook"]): Windsor's write-action catalogue,
+      // GET only, nothing is executed or stored. Once per call, not per account.
+      if (body.probe_actions) {
+        for (const conn of body.probe_actions as string[]) {
+          const r0 = await fetch(`https://connectors.windsor.ai/${encodeURIComponent(conn)}/actions?api_key=${WINDSOR_API_KEY}`)
+          const text = await r0.text()
+          let data: unknown = text.slice(0, 2000)
+          try { data = JSON.parse(text) } catch { /* not JSON */ }
+          results.push({ connector: conn, status: r0.status, data })
+        }
+        break
+      }
       // Test (body.probe): one Windsor request with the given fields, dates and extra parameters (e.g. a filter), returned
       // as is, nothing stored. Used to check whether a filtered request gives the platform's deduplicated reach for a set.
       if (body.probe) {
