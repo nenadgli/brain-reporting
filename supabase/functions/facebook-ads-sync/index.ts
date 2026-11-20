@@ -38,6 +38,49 @@ Deno.serve(async (req: Request) => {
                        data: Array.isArray(data) ? data.slice(0, 40) : text.slice(0, 500) })
         continue
       }
+      // Structure snapshot (body.structure, optional date_from/date_to, default the last 60 days): every ad that delivered,
+      // with campaign / ad set settings and ids, into meta_structure (rows of this source replaced). Read only.
+      if (body.structure) {
+        const to = body.date_to ?? new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+        const from = body.date_from ?? new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 10)
+        const fields = ['campaign', 'campaign_id', 'campaign_status', 'campaign_objective', 'campaign_daily_budget', 'campaign_lifetime_budget',
+          'campaign_bid_strategy', 'campaign_start_time', 'campaign_stop_time', 'adset_name', 'adset_id', 'adset_status', 'adset_daily_budget',
+          'adset_lifetime_budget', 'adset_bid_strategy', 'adset_optimization_goal', 'adset_billing_event', 'adset_start_time', 'adset_end_time',
+          'adset_targeting', 'adset_promoted_object', 'adset_attribution_spec', 'ad_name', 'ad_id', 'ad_status', 'creative_id', 'url_tags',
+          'link_url', 'spend'].join(',')
+        const p = new URLSearchParams({ date_from: from, date_to: to, api_key: WINDSOR_API_KEY, select_accounts: rawAccountId, fields })
+        const r0 = await fetch(`https://connectors.windsor.ai/facebook?${p.toString()}`)
+        if (!r0.ok) throw new Error(`Windsor structure HTTP ${r0.status}: ${(await r0.text()).slice(0, 300)}`)
+        const js = (v: unknown) => { if (v == null || v === '') return null; if (typeof v !== 'string') return v; try { return JSON.parse(v) } catch { return null } }
+        const num = (v: unknown) => (v == null || v === '' ? null : Number(v))
+        const out = new Map<string, Record<string, unknown>>()
+        for (const r of ((await r0.json()).data ?? []) as Record<string, unknown>[]) {
+          if (!r.ad_id) continue
+          const prev = out.get(String(r.ad_id))
+          const spend = Number(r.spend ?? 0) + Number(prev?.spend ?? 0)
+          out.set(String(r.ad_id), { client_id, data_source_id: source.id, account_id: rawAccountId,
+            campaign_id: r.campaign_id ?? null, campaign: r.campaign ?? null, campaign_status: r.campaign_status ?? null, campaign_objective: r.campaign_objective ?? null,
+            campaign_daily_budget: num(r.campaign_daily_budget), campaign_lifetime_budget: num(r.campaign_lifetime_budget), campaign_bid_strategy: r.campaign_bid_strategy ?? null,
+            campaign_start_time: r.campaign_start_time ?? null, campaign_stop_time: r.campaign_stop_time ?? null,
+            adset_id: r.adset_id ?? null, adset_name: r.adset_name ?? null, adset_status: r.adset_status ?? null,
+            adset_daily_budget: num(r.adset_daily_budget), adset_lifetime_budget: num(r.adset_lifetime_budget), adset_bid_strategy: r.adset_bid_strategy ?? null,
+            adset_optimization_goal: r.adset_optimization_goal ?? null, adset_billing_event: r.adset_billing_event ?? null,
+            adset_start_time: r.adset_start_time ?? null, adset_end_time: r.adset_end_time ?? null,
+            adset_targeting: js(r.adset_targeting), adset_promoted_object: js(r.adset_promoted_object), adset_attribution_spec: js(r.adset_attribution_spec),
+            ad_id: String(r.ad_id), ad_name: r.ad_name ?? null, ad_status: r.ad_status ?? null, creative_id: r.creative_id ?? null,
+            url_tags: r.url_tags ?? null, link_url: r.link_url ?? null, spend, window_from: from, window_to: to, synced_at: new Date().toISOString() })
+        }
+        const list = [...out.values()]
+        if (list.length) {
+          await supabase.from('meta_structure').delete().eq('data_source_id', source.id)
+          for (let i = 0; i < list.length; i += 500) {
+            const { error } = await supabase.from('meta_structure').insert(list.slice(i, i + 500))
+            if (error) throw error
+          }
+        }
+        results.push({ source: source.windsor_connection_id, structure_ads: list.length, from, to })
+        continue
+      }
       // Reach for a whole period (body.period_reach with date_from/date_to, normally a month): reach is people, so it cannot
       // be added up from daily rows. Asked without the date field, per campaign and per ad set, and kept in meta_period_reach.
       if (body.period_reach && body.date_from && body.date_to) {
